@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create exercises table
 CREATE TABLE IF NOT EXISTS exercises (
   id SERIAL PRIMARY KEY,
   name TEXT UNIQUE NOT NULL,
