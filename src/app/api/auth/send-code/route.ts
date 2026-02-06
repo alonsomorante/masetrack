@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { sendWhatsAppMessage } from '@/lib/services/twilio.service'
+import { sendVerificationCode } from '@/lib/services/sms.service'
 import { getUserByPhone } from '@/lib/supabase/client'
 import { storeCode } from '@/lib/auth/codes'
+import { formatPhoneNumber } from '@/lib/data/countries'
 
 export async function POST(request: NextRequest) {
   try {
-    const { phone } = await request.json()
+    const { phone, countryCode } = await request.json()
 
     if (!phone) {
       return NextResponse.json(
@@ -14,12 +15,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Formatear número si se proporciona countryCode
+    let formattedPhone = phone
+    if (countryCode) {
+      formattedPhone = formatPhoneNumber(phone, countryCode)
+    } else if (!phone.startsWith('+')) {
+      // Si no hay countryCode y no empieza con +, asumimos que ya viene formateado
+      formattedPhone = '+' + phone.replace(/\D/g, '')
+    }
+
     // Verificar si el usuario existe
-    const user = await getUserByPhone(phone)
+    const user = await getUserByPhone(formattedPhone)
     
     if (!user) {
       return NextResponse.json(
-        { error: 'Usuario no encontrado. Primero debes registrar entrenamientos por WhatsApp.' },
+        { error: 'Usuario no encontrado. Primero debes registrarte.' },
         { status: 404 }
       )
     }
@@ -28,13 +38,24 @@ export async function POST(request: NextRequest) {
     const code = Math.floor(100000 + Math.random() * 900000).toString()
     
     // Guardar código
-    storeCode(phone, code)
+    await storeCode(formattedPhone, code)
 
-    // Enviar código por WhatsApp
-    const message = `Tu código de verificación para Masetrack es: ${code}\n\nEste código expira en 10 minutos.`
-    await sendWhatsAppMessage(phone, message)
-
-    return NextResponse.json({ success: true, message: 'Código enviado' })
+    // Enviar código por SMS
+    try {
+      await sendVerificationCode(formattedPhone, code, user.name)
+      
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Código enviado por SMS',
+        phone: formattedPhone
+      })
+    } catch (smsError) {
+      console.error('Error enviando SMS:', smsError)
+      return NextResponse.json(
+        { error: 'Error al enviar SMS. Verifica que el número sea correcto.' },
+        { status: 500 }
+      )
+    }
   } catch (error) {
     console.error('Error sending code:', error)
     return NextResponse.json(

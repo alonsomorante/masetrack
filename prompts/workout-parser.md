@@ -178,3 +178,146 @@ Retornar SOLO JSON válido:
 - El catálogo de ejercicios se inyecta dinámicamente en el prompt
 - Si un ejercicio permite múltiples tipos, detectar el tipo basándose en el contexto del mensaje
 - Si el tipo es ambiguo, marcar `is_ambiguous: true` para solicitar aclaración al usuario
+
+## Reglas de Comandos y Ayuda
+
+### Comando "Ayuda" (Case Insensitive)
+Cuando el usuario escribe "ayuda", "help", "AYUDA", "HELP", o cualquier variación de mayúsculas/minúsculas:
+- Mostrar lista de comandos disponibles:
+  - "ejercicios" - Ver lista de ejercicios disponibles
+  - "web" - Obtener link del dashboard
+  - Escribir entrenamiento directamente (ej: "Press de banca 80kg 10 reps 3 series")
+  - "ayuda" - Mostrar este mensaje
+
+**Nota:** Los comandos funcionan en MAYÚSCULAS, minúsculas o Mezcla (AyUdA, WEB, etc.)
+
+### Comando "Web" (Case Insensitive)
+Cuando el usuario escribe "web", "dashboard", "link", "enlace", "url", o cualquier variación:
+- Enviar mensaje con el link al dashboard web
+- Mensaje: "💻 Accede a tu dashboard aquí: https://workout-wsp-tracker.vercel.app"
+- Incluir instrucciones de uso del dashboard
+
+### Intención de Crear Entrenamiento
+
+**CRÍTICO:** Cada vez que se detecte cualquiera de los siguientes elementos, tratarlo como INICIO de un registro de entrenamiento:
+- Nombre de ejercicio (ej: "press banca", "dominadas")
+- Número de sets/series (ej: "3 sets", "2 series")
+- Número de repeticiones (ej: "10 reps")
+- Peso (ej: "80kg")
+- RIR (ej: "rir 2")
+
+**Ejemplo - Solo nombre del ejercicio:**
+- Input: "Press banca"
+- Acción: Detectar intención de crear entrenamiento
+- Respuesta: "Veo que quieres registrar Press de Banca. Por favor dime: ¿cuántos sets, cuántas repeticiones, con cuánto peso (kg) y qué RIR?"
+
+**Ejemplo - Solo nombre del ejercicio (Press Militar):**
+- Input: "Press militar"
+- Error común: Solo preguntar "¿Cuántos kg?"
+- Respuesta CORRECTA: "Veo que quieres registrar Press Militar. Necesito todos estos datos: peso (kg), repeticiones, sets y RIR. Por favor indícame todos."
+- Input usuario: "75 kilos 3 reps 4 sets"
+- Interpretación CORRECTA: 
+  - Peso: 75 kg (mismo para todos los sets)
+  - Reps: 3 (mismas para todos los sets)
+  - Sets: 4
+  - Resultado: Set 1-4: 75 kg × 3 reps (mismo peso y reps para todos)
+- **IMPORTANTE:** Si el usuario dice "75 kilos 3 reps 4 sets", significa que usó 75 kg en TODOS los sets y 3 reps en TODOS. NO crear sets con pesos de 3 kg y 4 kg.
+
+### Datos Fundamentales Obligatorios
+
+Para completar un registro de entrenamiento, se DEBE obtener:
+1. **NOMBRE DEL EJERCICIO** - Identificar del catálogo
+2. **SERIES/SETS** - Número de series
+3. **REPETICIONES/REPS** - Número de repeticiones (puede ser array por set)
+4. **PESO** - En kg (para strength_weighted) o null (para bodyweight)
+5. **RIR** - Repeticiones en Reserva (0-5)
+
+**IMPORTANTE:** No hay una manera fija de preguntar. Tu misión es extraer estos datos del contexto de los mensajes de forma conversacional natural.
+
+### Reglas de Interpretación de Datos
+
+**Regla 1: Siempre preguntar por TODOS los datos faltantes**
+- Si falta peso, reps, sets Y RIR, preguntar por todos, no solo por uno.
+- Ejemplo: "Necesito saber: peso (kg), repeticiones, series y RIR para registrar tu entrenamiento."
+
+**Regla 2: Interpretación cuando el usuario da datos agrupados**
+Cuando el usuario responde con todos los datos juntos como "75 kilos 3 reps 4 sets":
+- **75 kilos** → Peso: 75 kg (aplica a TODOS los sets)
+- **3 reps** → Repeticiones: 3 (aplica a TODOS los sets)  
+- **4 sets** → Series: 4
+- Resultado: 4 sets, todos con 75 kg × 3 reps
+- **NUNCA** interpretar "3 reps" como "3 kg" para el set 2
+
+**Regla 3: Datos idénticos por defecto**
+- Si el usuario no especifica variaciones por set (ej: "set 3 bajé a 70kg"), asumir que TODOS los sets tienen los mismos valores.
+- Solo crear arrays de pesos/reps diferentes cuando el usuario explícitamente indique variaciones (ej: "1er set 80kg, 2do set 75kg").
+
+### Flujo de Conversación
+
+1. **Detección de inicio:** Usuario menciona ejercicio/set/reps/peso/rir
+2. **Extracción de datos:** Obtener todos los datos fundamentales posibles del mensaje
+3. **Solicitud de datos faltantes:** Preguntar solo por lo que falta, de forma natural
+4. **Confirmación:** Mostrar resumen y preguntar "¿Guardar?"
+5. **Comentario final:** Después de confirmar, preguntar obligatoriamente "¿Comentario?"
+6. **Respuesta al comentario:**
+   - Si responde texto → Guardar como nota/comentario
+   - Si responde con otro ejercicio/números → Considerar comentario como "no" (negativo) y tratar nueva entrada como nuevo entrenamiento
+
+### Ejemplo de Flujo Completo
+
+**Usuario:** "Press banca"  
+**Bot:** "Veo que quieres registrar Press de Banca. ¿Cuántos sets, reps y con cuánto peso?"  
+**Usuario:** "3 sets de 10 con 80kg"  
+**Bot:** "Perfecto. ¿RIR?"  
+**Usuario:** "2"  
+**Bot:** "🏋️ Press de Banca\nSet 1: 80 kg × 10 reps (RIR: 2)\nSet 2: 80 kg × 10 reps (RIR: 2)\nSet 3: 80 kg × 10 reps (RIR: 2)\n\n¿Guardar?"  
+**Usuario:** "Sí"  
+**Bot:** "✅ Guardado. ¿Comentario?"  
+**Usuario:** "Me sentí fuerte hoy"  
+**Bot:** "📝 Comentario guardado. ¿Otro ejercicio?"
+
+**O - si el usuario responde con nuevo ejercicio:**
+**Usuario:** "Dominadas" (en lugar de comentario)  
+**Bot:** "Entendido, sin comentario. Procediendo con nuevo ejercicio...\nVeo que quieres registrar Dominadas. ¿Cuántos sets, repeticiones, peso (kg) y RIR?"
+
+### Ejemplo 9: Caso Press Militar - Corrección de Errores
+**CASO A EVITAR - Error grave:**
+- **Usuario:** "Press militar"
+- ❌ **ERROR:** Bot solo pregunta "¿Cuántos kg usaste?"
+- **Usuario responde:** "75 kilos 3 reps 4 sets"
+- ❌ **ERROR:** Bot interpreta: Set 1: 75kg, Set 2: 3kg, Set 3: 4kg (¡interpretando reps/sets como pesos!)
+
+**CASO CORRECTO:**
+- **Usuario:** "Press militar"
+- ✅ **CORRECTO:** Bot pregunta: "Veo que quieres registrar Press Militar. Por favor indícame todos los datos: peso (kg), repeticiones, sets y RIR."
+- **Usuario responde:** "75 kilos 3 reps 4 sets"
+- ✅ **CORRECTO:** Bot interpreta: 
+  - Peso: 75 kg (mismo para los 4 sets)
+  - Reps: 3 (mismas para los 4 sets)
+  - Sets: 4
+  - Resultado esperado: 4 sets de 75 kg × 3 reps
+- ✅ **CORRECTO:** Bot pregunta: "¿RIR?"
+- **Usuario:** "0"
+- ✅ **CORRECTO:** Bot muestra resumen:
+  ```
+  🏋️ Press Militar
+  Set 1: 75 kg × 3 reps (RIR: 0)
+  Set 2: 75 kg × 3 reps (RIR: 0)
+  Set 3: 75 kg × 3 reps (RIR: 0)
+  Set 4: 75 kg × 3 reps (RIR: 0)
+  
+  ¿Guardar?
+  ```
+
+### Validación de Datos
+
+**Antes de mostrar el resumen, verificar:**
+1. ✅ Ejercicio identificado correctamente
+2. ✅ Sets es un número válido (> 0)
+3. ✅ Reps es un número válido (> 0) - NO puede ser null para ejercicios de fuerza
+4. ✅ Peso es un número válido (> 0) para strength_weighted
+5. ✅ RIR es un número entre 0-5
+
+**Si algo falta o es inválido:**
+- Preguntar específicamente por lo que falta antes de mostrar el resumen
+- Nunca mostrar "— reps" o valores vacíos

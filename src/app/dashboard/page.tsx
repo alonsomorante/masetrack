@@ -54,6 +54,7 @@ export default function DashboardPage() {
   const [workouts, setWorkouts] = useState<Workout[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showSandboxBanner, setShowSandboxBanner] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -62,6 +63,12 @@ export default function DashboardPage() {
     if (!phone) {
       router.push('/login')
       return
+    }
+    
+    // Verificar si el usuario necesita unirse al WhatsApp Sandbox
+    const whatsappJoined = localStorage.getItem('whatsappJoined')
+    if (whatsappJoined === 'false') {
+      setShowSandboxBanner(true)
     }
     
     fetchDashboardData(phone)
@@ -123,7 +130,23 @@ export default function DashboardPage() {
             DASHBOARD PRINCIPAL
           </h1>
         </div>
-        
+
+        {/* WhatsApp Sandbox Banner */}
+        {showSandboxBanner && (
+          <div className="bg-yellow-500/10 border border-yellow-500 p-4 mb-6">
+            <h3 className="font-bold text-yellow-500 mb-2">⚠️ Activa WhatsApp</h3>
+            <p className="text-sm">Para registrar entrenamientos por WhatsApp:</p>
+            <ol className="list-decimal ml-5 mt-2 space-y-1 text-sm">
+              <li>Abre WhatsApp</li>
+              <li>Envía mensaje a: <strong>+14155238886</strong></li>
+              <li>Escribe: <code>join needs-policeman</code></li>
+            </ol>
+            <p className="mt-2 text-xs text-gray-500">
+              Una vez hecho, podrás escribirnos tus entrenamientos por WhatsApp.
+            </p>
+          </div>
+        )}
+         
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <div className="tech-panel p-6">

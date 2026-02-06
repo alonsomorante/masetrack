@@ -2,12 +2,15 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Activity, BarChart3, Database, Settings } from 'lucide-react'
+import { Loader2, Activity, BarChart3, Database } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
+import { CountrySelector } from '@/components/ui/CountrySelector'
+import { COUNTRIES, getDefaultCountry, Country } from '@/lib/data/countries'
 
 export default function LandingPage() {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
+  const [countryCode, setCountryCode] = useState(getDefaultCountry().code)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
@@ -22,7 +25,7 @@ export default function LandingPage() {
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, phone }),
+        body: JSON.stringify({ name, phone, countryCode }),
       })
 
       const data = await response.json()
@@ -30,7 +33,7 @@ export default function LandingPage() {
       if (response.ok) {
         setSuccess(true)
         setTimeout(() => {
-          router.push(`/verify?phone=${encodeURIComponent(phone)}&register=true`)
+          router.push(`/verify?phone=${encodeURIComponent(data.phone || phone)}&register=true`)
         }, 2000)
       } else {
         setError(data.error || 'ERROR: REGISTRO FALLIDO')
@@ -41,6 +44,8 @@ export default function LandingPage() {
       setLoading(false)
     }
   }
+
+  const selectedCountry = COUNTRIES.find(c => c.code === countryCode) || getDefaultCountry()
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -72,7 +77,7 @@ export default function LandingPage() {
             </div>
             <div>
               <span className="font-display text-xl font-bold text-[var(--text-primary)] tracking-wider">
-                FITTRACK PRO
+                MASETRACK
               </span>
               <span className="font-mono text-xs text-[var(--accent)] block">SISTEMA DE CONTROL</span>
             </div>
@@ -110,7 +115,7 @@ export default function LandingPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 {[
-                  { label: 'REGISTRO', value: 'WHATSAPP/WEB', status: 'ACTIVE' },
+                  { label: 'REGISTRO', value: 'SMS/WEB', status: 'ACTIVE' },
                   { label: 'VISUALIZACIÓN', value: 'GRÁFICOS', status: 'ACTIVE' },
                   { label: 'CATÁLOGO', value: 'EJERCICIOS', status: 'ACTIVE' },
                   { label: 'PERSONALIZACIÓN', value: 'CUSTOM', status: 'ACTIVE' },
@@ -156,7 +161,7 @@ export default function LandingPage() {
                     REGISTRO EXITOSO
                   </h3>
                   <p className="font-mono text-sm text-[var(--text-secondary)]">
-                    CÓDIGO DE VERIFICACIÓN ENVIADO
+                    CÓDIGO DE VERIFICACIÓN ENVIADO POR SMS
                   </p>
                 </div>
               ) : (
@@ -177,18 +182,25 @@ export default function LandingPage() {
 
                   <div>
                     <label className="block font-mono text-xs text-[var(--text-secondary)] uppercase tracking-wider mb-2">
-                      WHATSAPP // ID-002
+                      TELÉFONO // ID-002
                     </label>
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="[+XX XXXXXXXXX]"
-                      className="tech-input w-full"
-                      required
-                    />
+                    <div className="flex gap-2">
+                      <CountrySelector
+                        value={countryCode}
+                        onChange={(country: Country) => setCountryCode(country.code)}
+                        className="w-48"
+                      />
+                      <input
+                        type="tel"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder={selectedCountry.example}
+                        className="tech-input w-full"
+                        required
+                      />
+                    </div>
                     <p className="font-mono text-[10px] text-[var(--text-muted)] mt-2 uppercase">
-                      Formato: +51 para Perú
+                      Ejemplo: {selectedCountry.flag} {selectedCountry.prefix} {selectedCountry.example}
                     </p>
                   </div>
 
@@ -233,7 +245,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex justify-between items-center">
             <div className="font-mono text-xs text-[var(--text-muted)]">
-              SISTEMA DE CONTROL // FITTRACK PRO v2.1.4
+              SISTEMA DE CONTROL // MASETRACK v2.1.4
             </div>
             <div className="flex items-center gap-4">
               <span className="font-mono text-xs text-[var(--text-muted)]">MEM: 64%</span>

@@ -163,6 +163,26 @@ src/
 - Commit when explicitly requested by user
 - Never commit `.env.local` or secrets
 
+## IMPORTANT RULE - Prompt Synchronization
+
+**⚠️ CRITICAL:** Any changes made to `prompts/workout-parser.md` MUST be simultaneously implemented in `src/lib/services/claude.service.ts` in the `systemPrompt` variable.
+
+### Why This Matters
+The `prompts/workout-parser.md` file serves as documentation and a reference for developers, but the actual prompt sent to Claude AI is defined in the `systemPrompt` variable within `claude.service.ts`. These two must always be in sync.
+
+### Process for Updating Prompts
+1. Update `prompts/workout-parser.md` with the new rules/examples
+2. **ALSO** update the `systemPrompt` variable in `src/lib/services/claude.service.ts`
+3. Ensure both files contain identical information
+4. Test the changes before deploying
+
+### Verification Checklist
+- [ ] Changes applied to `prompts/workout-parser.md`
+- [ ] Changes applied to `src/lib/services/claude.service.ts` systemPrompt
+- [ ] Both files are consistent
+- [ ] Build passes without errors
+- [ ] Test with actual workout messages
+
 ## Detailed Implementation Todo
 
 ### 1. Prompts Updates
@@ -235,3 +255,74 @@ src/
 - [ ] Update README with new features
 - [ ] Document error codes and handling
 - [ ] Add example request/response pairs
+
+## Flujo de Registro y Login (SMS)
+
+### Registro Nuevo Usuario
+1. Usuario entra a `/` (homepage)
+2. Ingresa: Nombre + Teléfono (con selector de país de 19 países de América)
+3. Sistema valida teléfono único
+4. Genera código SMS de 6 dígitos
+5. Envía SMS vía Twilio al número del usuario
+6. Redirige a `/verify?phone=+51999XXXXXX&register=true`
+7. Usuario ingresa código recibido por SMS
+8. Sistema verifica código y marca usuario como verificado
+9. Sistema intenta enviar mensaje de bienvenida por WhatsApp
+   - Si tiene éxito: Usuario recibe mensaje en WhatsApp
+   - Si falla (no está en Sandbox): Guarda estado y continúa
+10. Redirige a `/dashboard`
+11. Dashboard verifica estado de WhatsApp
+    - Si no está en Sandbox: Muestra banner amarillo con instrucciones para unirse
+    - Si está en Sandbox: Muestra dashboard normal
+
+### Login Usuario Existente
+1. Usuario entra a `/login`
+2. Ingresa: Teléfono (con selector de país)
+3. Sistema valida que usuario existe en la base de datos
+4. Genera código SMS de 6 dígitos
+5. Envía SMS vía Twilio
+6. Redirige a `/verify?phone=+51999XXXXXX`
+7. Usuario ingresa código
+8. Sistema verifica código
+9. Redirige a `/dashboard`
+10. Dashboard muestra banner si el usuario aún no está en WhatsApp Sandbox
+
+### Uso WhatsApp (Tracking de Entrenamientos)
+1. Usuario ya registrado y verificado en la web
+2. Usuario envía mensaje por WhatsApp al número de Twilio (+14155238886)
+3. Sistema reconoce número de teléfono (ya está en DB)
+4. Inicia flujo normal de tracking de entrenamientos:
+   - Parsea mensaje con Claude
+   - Pide datos faltantes si es necesario
+   - Muestra resumen por set
+   - Pide confirmación
+   - Pide comentario
+   - Guarda en base de datos
+5. Datos sincronizados automáticamente con dashboard web
+
+### Mensaje de Bienvenida por WhatsApp
+```
+¡Bienvenido a Masetrack, [Nombre]! 🎉
+
+Tu cuenta está activa.
+
+📱 Para registrar entrenamientos:
+• Escríbenos por WhatsApp a este número
+• Ejemplo: "Press de banca 80kg 10 reps 3 series"
+• Guardaré todo automáticamente
+
+💻 Para ver tu progreso:
+• Accede a: https://workout-wsp-tracker.vercel.app
+• Revisa tu historial y estadísticas
+
+¿Preguntas? Responde aquí o escribe "ayuda"
+
+¡A entrenar! 💪
+```
+
+### Datos Técnicos
+- **Número de WhatsApp Sandbox:** +14155238886
+- **Número de SMS Twilio:** +18204449516 (número de teléfono regular)
+- **Países soportados:** 19 países de América (Perú default)
+- **Costo SMS:** ~$0.0075 USD por mensaje
+- **Costo WhatsApp:** Gratis cuando el usuario inicia la conversación

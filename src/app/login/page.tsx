@@ -4,9 +4,12 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, Loader2, Activity, Lock } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
+import { CountrySelector } from '@/components/ui/CountrySelector'
+import { COUNTRIES, getDefaultCountry, Country } from '@/lib/data/countries'
 
 export default function UserLoginPage() {
   const [phone, setPhone] = useState('')
+  const [countryCode, setCountryCode] = useState(getDefaultCountry().code)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const router = useRouter()
@@ -20,13 +23,13 @@ export default function UserLoginPage() {
       const response = await fetch('/api/auth/send-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ phone, countryCode }),
       })
 
       const data = await response.json()
 
       if (response.ok) {
-        router.push(`/verify?phone=${encodeURIComponent(phone)}`)
+        router.push(`/verify?phone=${encodeURIComponent(data.phone || phone)}`)
       } else {
         setError(data.error || 'ERROR: ENVÍO FALLIDO')
       }
@@ -36,6 +39,8 @@ export default function UserLoginPage() {
       setLoading(false)
     }
   }
+
+  const selectedCountry = COUNTRIES.find(c => c.code === countryCode) || getDefaultCountry()
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
@@ -60,7 +65,7 @@ export default function UserLoginPage() {
                 <Activity className="w-5 h-5 text-[var(--bg-primary)]" />
               </div>
               <div>
-                <span className="font-display text-sm font-bold text-[var(--text-primary)] tracking-wider">FITTRACK PRO</span>
+                <span className="font-display text-sm font-bold text-[var(--text-primary)] tracking-wider">MASETRACK</span>
                 <span className="font-mono text-[10px] text-[var(--accent)] block">SISTEMA DE CONTROL</span>
               </div>
             </div>
@@ -90,16 +95,26 @@ export default function UserLoginPage() {
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block font-mono text-xs text-[var(--text-secondary)] uppercase tracking-wider mb-2">
-                WHATSAPP // ID-USER
+                TELÉFONO // ID-USER
               </label>
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="[+XX XXXXXXXXX]"
-                className="tech-input w-full"
-                required
-              />
+              <div className="flex gap-2">
+                <CountrySelector
+                  value={countryCode}
+                  onChange={(country: Country) => setCountryCode(country.code)}
+                  className="w-48"
+                />
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder={selectedCountry.example}
+                  className="tech-input w-full"
+                  required
+                />
+              </div>
+              <p className="font-mono text-[10px] text-[var(--text-muted)] mt-2 uppercase">
+                Ejemplo: {selectedCountry.flag} {selectedCountry.prefix} {selectedCountry.example}
+              </p>
             </div>
 
             {error && (

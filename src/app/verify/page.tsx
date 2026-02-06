@@ -42,6 +42,13 @@ function VerifyForm() {
         localStorage.setItem('userPhone', phone)
         localStorage.setItem('userName', data.user?.name || '')
         
+        // Guardar estado de WhatsApp Sandbox
+        if (data.whatsappJoined === false) {
+          localStorage.setItem('whatsappJoined', 'false')
+        } else {
+          localStorage.setItem('whatsappJoined', 'true')
+        }
+        
         // Redirigir después de 2 segundos
         setTimeout(() => {
           router.push('/dashboard')
@@ -109,7 +116,7 @@ function VerifyForm() {
                 <Lock className="w-5 h-5 text-[var(--bg-primary)]" />
               </div>
               <div>
-                <span className="font-display text-sm font-bold text-[var(--text-primary)] tracking-wider">FITTRACK PRO</span>
+                <span className="font-display text-sm font-bold text-[var(--text-primary)] tracking-wider">MASETRACK</span>
                 <span className="font-mono text-[10px] text-[var(--accent)] block">VERIFICACIÓN DE ACCESO</span>
               </div>
             </div>

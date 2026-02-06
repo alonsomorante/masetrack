@@ -124,7 +124,78 @@ EXAMPLES:
   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": null, "sets": 3, "reps": 5, "rir": [1, 0, 0], "notes": null}
 
 - Input: "Press banca 3 sets, set 1: 80kg x 5 reps rir 1, set 2: 75kg x 6 reps rir 0, set 3: 75kg x 5 reps rir 0"
-  Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": [80, 75, 75], "sets": 3, "reps": [5, 6, 5], "rir": [1, 0, 0], "notes": null}`;
+  Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": [80, 75, 75], "sets": 3, "reps": [5, 6, 5], "rir": [1, 0, 0], "notes": null}
+
+CRITICAL RULES FOR CONVERSATION FLOW:
+
+1. ALWAYS ASK FOR ALL MISSING DATA:
+   - If weight, reps, sets AND RIR are missing, ask for all of them, not just one.
+   - Example: "Necesito saber: peso (kg), repeticiones, series y RIR para registrar tu entrenamiento."
+
+2. INTERPRETATION WHEN USER PROVIDES GROUPED DATA:
+   When user responds with all data together like "75 kilos 3 reps 4 sets":
+   - "75 kilos" → Weight: 75 kg (applies to ALL sets)
+   - "3 reps" → Reps: 3 (applies to ALL sets)
+   - "4 sets" → Sets: 4
+   - Result: 4 sets, all with 75 kg × 3 reps
+   - NEVER interpret "3 reps" as "3 kg" for set 2
+
+3. IDENTICAL DATA BY DEFAULT:
+   - If user doesn't specify variations per set (e.g., "set 3 dropped to 70kg"), assume ALL sets have the same values.
+   - Only create different weight/reps arrays when user explicitly indicates variations (e.g., "1st set 80kg, 2nd set 75kg").
+
+4. DETECTING TRAINING INTENTION:
+   CRITICAL: Each time ANY of the following is detected, treat it as START of a workout registration:
+   - Exercise name (e.g., "press banca", "dominadas")
+   - Number of sets/series (e.g., "3 sets", "2 series")
+   - Number of reps (e.g., "10 reps")
+   - Weight (e.g., "80kg")
+   - RIR (e.g., "rir 2")
+
+5. COMPLETE WORKOUT DATA REQUIRED:
+   To complete a workout registration, MUST obtain:
+   1. EXERCISE NAME - Identify from catalog
+   2. SETS/SERIES - Number of sets
+   3. REPS/REPETITIONS - Number of reps (can be array per set)
+   4. WEIGHT - In kg (for strength_weighted) or null (for bodyweight)
+   5. RIR - Repetitions in Reserve (0-5)
+
+6. EXAMPLE - Press Militar Case (Common Error to Avoid):
+   INCORRECT:
+   - User: "Press militar"
+   - Bot asks only: "¿Cuántos kg usaste?"
+   - User responds: "75 kilos 3 reps 4 sets"
+   - Bot interprets: Set 1: 75kg, Set 2: 3kg, Set 3: 4kg (interpreting reps/sets as weights!)
+
+   CORRECT:
+   - User: "Press militar"
+   - Bot asks: "Veo que quieres registrar Press Militar. Por favor indícame todos los datos: peso (kg), repeticiones, sets y RIR."
+   - User responds: "75 kilos 3 reps 4 sets"
+   - Bot interprets:
+     * Weight: 75 kg (same for all 4 sets)
+     * Reps: 3 (same for all 4 sets)
+     * Sets: 4
+     * Expected result: 4 sets of 75 kg × 3 reps
+   - Bot asks: "¿RIR?"
+   - User: "0"
+   - Bot shows summary:
+     🏋️ Press Militar
+     Set 1: 75 kg × 3 reps (RIR: 0)
+     Set 2: 75 kg × 3 reps (RIR: 0)
+     Set 3: 75 kg × 3 reps (RIR: 0)
+     Set 4: 75 kg × 3 reps (RIR: 0)
+
+7. DATA VALIDATION:
+   Before showing summary, verify:
+   - Exercise identified correctly
+   - Sets is valid number (> 0)
+   - Reps is valid number (> 0) - CANNOT be null for strength exercises
+   - Weight is valid number (> 0) for strength_weighted
+   - RIR is number between 0-5
+
+   If anything missing or invalid:
+   - Ask specifically for what's missing before showing summary
+   - Never show "— reps" or empty values`
 
   try {
     const response = await anthropic.messages.create({

@@ -18,6 +18,7 @@ export class ConversationService {
   private readonly COMMANDS = {
     HELP: ['hola', 'ayuda', 'help', 'menu', 'comandos', 'info'],
     EXERCISES: ['ejercicios', 'lista', 'catalogo', 'catálogo'],
+    WEB: ['web', 'dashboard', 'link', 'enlace', 'url'],
   };
 
   // Helper function to format reps for display
@@ -126,7 +127,8 @@ export class ConversationService {
       : `¡Hola de nuevo${userName}! 👋`;
     
     message += '\n\n📋 *COMANDOS DISPONIBLES:*\n';
-    message += '• Escribe "ejercicios" para ver la lista\n';
+    message += '• "ejercicios" - Ver lista de ejercicios\n';
+    message += '• "web" - Obtener link del dashboard\n';
     message += '• Describe tu entrenamiento directamente\n';
     message += '\n💪 *CÓMO REGISTRAR:*\n';
     message += '\n*Ejercicios de Fuerza:*\n';
@@ -144,6 +146,20 @@ export class ConversationService {
     message += '\n✨ Si no reconozco un ejercicio, te ayudaré a crearlo.';
     
     return message;
+  }
+
+  // Mensaje con link al dashboard web
+  private getWebMessage(): string {
+    const userName = this.user?.name ? ` ${this.user.name}` : '';
+    
+    return `¡Hola${userName}! 👋\n\n` +
+           `💻 Accede a tu dashboard aquí:\n` +
+           `https://workout-wsp-tracker.vercel.app\n\n` +
+           `Allí podrás:\n` +
+           `• Ver tu historial completo\n` +
+           `• Visualizar estadísticas\n` +
+           `• Editar o eliminar registros\n\n` +
+           `Inicia sesión con tu número de teléfono.`;
   }
 
   // Mensaje de lista de ejercicios
@@ -208,6 +224,10 @@ export class ConversationService {
         
         if (this.isCommand(message, this.COMMANDS.EXERCISES)) {
           return this.getExercisesMessage();
+        }
+        
+        if (this.isCommand(message, this.COMMANDS.WEB)) {
+          return this.getWebMessage();
         }
       }
 

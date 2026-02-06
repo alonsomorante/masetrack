@@ -22,14 +22,15 @@ function getTwilioPhoneNumber() {
 export async function sendWhatsAppMessage(to: string, body: string): Promise<void> {
   try {
     const client = getTwilioClient();
-    const phoneNumber = getTwilioPhoneNumber();
+    // Usar número de WhatsApp Sandbox (diferente al número de SMS)
+    const whatsappNumber = '+14155238886';
 
     await client.messages.create({
-      from: `whatsapp:${phoneNumber}`,
+      from: `whatsapp:${whatsappNumber}`,
       to: `whatsapp:${to}`,
       body,
     });
-    console.log(`Sent to ${to}: ${body.substring(0, 50)}...`);
+    console.log(`WhatsApp sent to ${to}: ${body.substring(0, 50)}...`);
   } catch (error) {
     console.error('Error sending WhatsApp:', error);
     throw error;
