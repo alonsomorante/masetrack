@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS exercises (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create workout_entries table
 CREATE TABLE IF NOT EXISTS workout_entries (
   id SERIAL PRIMARY KEY,
   user_phone TEXT REFERENCES users(phone_number) ON DELETE CASCADE,
