@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Activity, BarChart3, Database } from 'lucide-react'
+import { Loader2, Activity, Database } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { CountrySelector } from '@/components/ui/CountrySelector'
 import { COUNTRIES, getDefaultCountry, Country } from '@/lib/data/countries'
@@ -107,30 +107,7 @@ export default function LandingPage() {
               </p>
             </div>
 
-            {/* STATS PANEL */}
-            <div className="tech-panel p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <BarChart3 className="w-5 h-5 text-[var(--accent)]" />
-                <span className="font-mono text-xs text-[var(--accent)] uppercase tracking-wider">ESPECIFICACIONES</span>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  { label: 'REGISTRO', value: 'SMS/WEB', status: 'ACTIVE' },
-                  { label: 'VISUALIZACIÓN', value: 'GRÁFICOS', status: 'ACTIVE' },
-                  { label: 'CATÁLOGO', value: 'EJERCICIOS', status: 'ACTIVE' },
-                  { label: 'PERSONALIZACIÓN', value: 'CUSTOM', status: 'ACTIVE' },
-                ].map((item, i) => (
-                  <div key={i} className="tech-panel-inset p-3">
-                    <div className="font-mono text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">{item.label}</div>
-                    <div className="font-display text-sm text-[var(--text-primary)]">{item.value}</div>
-                    <div className="flex items-center gap-1 mt-2">
-                      <span className="status-indicator status-active"></span>
-                      <span className="font-mono text-[10px] text-[var(--success)]">{item.status}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+
           </div>
 
           {/* RIGHT SIDE - REGISTRATION FORM */}

@@ -326,3 +326,53 @@ Tu cuenta está activa.
 - **Países soportados:** 19 países de América (Perú default)
 - **Costo SMS:** ~$0.0075 USD por mensaje
 - **Costo WhatsApp:** Gratis cuando el usuario inicia la conversación
+
+## Flujo de Autenticación y WhatsApp
+
+### Flujo Completo de Registro (Usuarios Nuevos)
+1. Usuario nuevo entra a homepage (`/`)
+2. Ingresa nombre + teléfono
+3. Sistema genera código SMS de 6 dígitos
+4. Envía SMS vía Twilio
+5. Redirige a `/verify?phone=...&register=true`
+6. Usuario ingresa código SMS
+7. Sistema verifica código
+8. **SI ES REGISTRO (register=true):** Envía mensaje de bienvenida por WhatsApp
+9. Redirige a dashboard
+10. Usuario puede usar la aplicación
+
+### Flujo de Login (Usuarios Existentes)
+1. Usuario existente entra a `/login`
+2. Ingresa teléfono
+3. Sistema genera código SMS
+4. Envía SMS vía Twilio
+5. Redirige a `/verify?phone=...` (SIN register=true)
+6. Usuario ingresa código
+7. Sistema verifica código
+8. **NO envía mensaje de WhatsApp** (usuario ya registrado)
+9. Redirige a dashboard
+
+### Nota Importante
+El mensaje de bienvenida por WhatsApp SOLO debe enviarse durante el registro inicial (`isRegister = true`). Los usuarios existentes que hacen login no deben recibir este mensaje.
+
+## Fix de Bug: Substring Matching en Comandos
+
+**Fecha:** 2026-02-06  
+**Archivo:** `src/lib/services/conversation.service.ts`  
+**Problema:** La función `isCommand` usaba `includes()` para verificar comandos, causando que palabras como "curl" coincidan con "url".
+
+**Ejemplo del bug:**
+- Usuario envía: "Lying leg curl 60kg..."
+- Sistema detecta: `'curl'.includes('url')` → `true`
+- Resultado: Muestra mensaje del dashboard en lugar de procesar ejercicio
+
+**Solución aplicada:**
+```typescript
+private isCommand(message: string, commandList: string[]): boolean {
+  const msg = message.toLowerCase().trim();
+  const words = msg.split(/\s+/);
+  return commandList.some(cmd => words.includes(cmd));
+}
+```
+
+**Verificación:** Usar coincidencia de palabras completas en lugar de substrings.

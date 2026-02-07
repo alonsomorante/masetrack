@@ -30,7 +30,7 @@ function VerifyForm() {
       const response = await fetch('/api/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, code }),
+        body: JSON.stringify({ phone, code, isRegister }),
       })
 
       const data = await response.json()

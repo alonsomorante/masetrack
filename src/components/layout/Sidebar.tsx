@@ -10,7 +10,6 @@ import {
   Menu,
   X,
   Activity,
-  Settings,
   LogOut
 } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
@@ -141,11 +140,7 @@ export default function Sidebar({ userName }: SidebarProps) {
           </nav>
 
           {/* Footer Actions */}
-          <div className="p-4 border-t border-[var(--border-color)] space-y-2">
-            <button className="w-full flex items-center gap-3 px-3 py-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-panel)] transition-colors">
-              <Settings className="w-4 h-4" />
-              <span className="font-mono text-xs uppercase tracking-wider">CONFIGURACIÓN</span>
-            </button>
+          <div className="p-4 border-t border-[var(--border-color)]">
             <button 
               onClick={() => {
                 localStorage.clear()

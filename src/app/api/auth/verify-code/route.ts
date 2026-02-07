@@ -8,7 +8,7 @@ const ADMIN_NUMBERS = ['+51997184232'] // Agrega tu número aquí
 
 export async function POST(request: NextRequest) {
   try {
-    const { phone, code } = await request.json()
+    const { phone, code, isRegister } = await request.json()
 
     if (!phone || !code) {
       return NextResponse.json(
@@ -40,10 +40,11 @@ export async function POST(request: NextRequest) {
     // Verificar si es admin
     const isAdmin = ADMIN_NUMBERS.includes(phone)
 
-    // Intentar enviar mensaje de bienvenida por WhatsApp
+    // Intentar enviar mensaje de bienvenida por WhatsApp (SOLO para usuarios nuevos)
     let whatsappJoined = true
-    try {
-      const welcomeMessage = `¡Bienvenido a Masetrack, ${user.name}! 🎉
+    if (isRegister) {
+      try {
+        const welcomeMessage = `¡Bienvenido a Masetrack, ${user.name}! 🎉
 
 Tu cuenta está activa.
 
@@ -60,17 +61,18 @@ Tu cuenta está activa.
 
 ¡A entrenar! 💪`
 
-      await sendWhatsAppMessage(phone, welcomeMessage)
-    } catch (error: any) {
-      // Si es error de Sandbox (número no válido para WhatsApp), ignorar silenciosamente
-      if (error.message?.includes('not a valid WhatsApp') || 
-          error.code === 21614 ||
-          error.status === 400) {
-        whatsappJoined = false
-        console.log(`Usuario ${phone} no está en WhatsApp Sandbox, continuando sin enviar mensaje`)
-      } else {
-        // Otros errores sí los loggeamos pero no bloqueamos al usuario
-        console.error('Error enviando WhatsApp de bienvenida:', error)
+        await sendWhatsAppMessage(phone, welcomeMessage)
+      } catch (error: any) {
+        // Si es error de Sandbox (número no válido para WhatsApp), ignorar silenciosamente
+        if (error.message?.includes('not a valid WhatsApp') || 
+            error.code === 21614 ||
+            error.status === 400) {
+          whatsappJoined = false
+          console.log(`Usuario ${phone} no está en WhatsApp Sandbox, continuando sin enviar mensaje`)
+        } else {
+          // Otros errores sí los loggeamos pero no bloqueamos al usuario
+          console.error('Error enviando WhatsApp de bienvenida:', error)
+        }
       }
     }
 
