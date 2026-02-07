@@ -115,7 +115,8 @@ export class ConversationService {
   // Verificar si el mensaje es un comando
   private isCommand(message: string, commandList: string[]): boolean {
     const msg = message.toLowerCase().trim();
-    return commandList.some(cmd => msg.includes(cmd));
+    const words = msg.split(/\s+/);
+    return commandList.some(cmd => words.includes(cmd));
   }
 
   // Mensaje de ayuda/bienvenida
