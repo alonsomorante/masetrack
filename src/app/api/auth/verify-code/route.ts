@@ -50,7 +50,8 @@ Tu cuenta está activa.
 
 📱 Para registrar entrenamientos:
 • Escríbenos por WhatsApp a este número
-• Ejemplo: "Press de banca 80kg 10 reps 3 series"
+• Ejemplo: "Press de banca 80kg 10 reps 3 series RIR 1"
+• También puedes decir: "todos al fallo" o "una más"
 • Guardaré todo automáticamente
 
 💻 Para ver tu progreso:

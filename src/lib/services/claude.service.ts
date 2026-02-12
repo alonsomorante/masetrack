@@ -34,7 +34,19 @@ Look for keywords in the message:
 
 EXTRACTION RULES - READ CAREFULLY:
 
-1. EXERCISE NAME: Match against the catalog above. Use the exact catalog name.
+1. EXERCISE NAME EXTRACTION - CRITICAL:
+   - Extract the exercise name from the BEGINNING of the message, BEFORE any numbers/weight/reps
+   - Match against the catalog and aliases. Be FLEXIBLE with:
+     * Typos: "press banca" (missing "de"), "sentadlla" → "sentadilla"
+     * Missing words: "press banca" → "Press de Banca"
+     * Word order: "banca press" → "Press de Banca"
+     * Abbreviations: "dom" → "Dominadas", "plan" → "Plancha"
+   - When message format is "ExerciseName Weight", extract ONLY the exercise name part:
+     * "Press de banca 70 kilos" → exercise_name: "Press de Banca", weight_kg: 70
+     * "Press banca 80kg" → exercise_name: "Press de Banca", weight_kg: 80
+     * "Sentadilla 100kg" → exercise_name: "Sentadilla", weight_kg: 100
+   - If you can't find an exact match, look for the CLOSEST match in the catalog
+   - Return null ONLY if NO exercise name can be reasonably inferred
 
 2. EXERCISE TYPE: Detect based on context:
    - If message has time units (segundos/minutos) but NO reps → type: "isometric_time" or "cardio_time"
@@ -71,9 +83,28 @@ EXTRACTION RULES - READ CAREFULLY:
    ONLY return a single number if ALL sets have the same reps:
    - "5 reps 2 sets" → "reps": 5
 
-8. RIR (Repetitions in Reserve) - 0 to 5:
-   - Look for RIR mentioned: "rir 0", "ambos rir 0", "rir: 2"
-   - For strength exercises only
+8. RIR (Repetitions in Reserve) - OBLIGATORY FIELD:
+    - RIR is REQUIRED. Extract it from the FIRST message whenever possible.
+    - RIR represents how many MORE reps the user could have done before stopping.
+    - 0 = reached failure (couldn't do any more)
+    - 1-5 = could have done that many more reps
+    
+    EXTRACTION PATTERNS from natural language:
+    - "RIR 0" / "rir 0" / "RIR: 0" → rir: 0 or [0, 0, 0]
+    - "RIR 1 en todos" / "rir 1" → rir: 1 or [1, 1, 1]
+    - "todos al fallo" / "todas al fallo" → rir: [0, 0, 0]
+    - "lo di todo" / "di todo" / "al fallo" → rir: 0
+    - "no podía más" / "no podia mas" → rir: 0
+    - "una más" / "una mas" / "dejé una" → rir: 1
+    - "dos más" / "dos mas" / "dejé dos" → rir: 2
+    - "primer set al fallo, segundo una más" → rir: [0, 1]
+    - "set 1: 0, set 2: 2" → rir: [0, 2]
+    - "pude haber hecho 1 más" → rir: 1
+    - "pude haber hecho 2 más" → rir: 2
+    
+    If RIR is NOT provided in first message, set rir: null.
+    If RIR is provided as single number for multiple sets, use that number for all sets.
+    If RIR varies by set, return as array: [0, 1, 2]
 
 9. CALORIES (optional for cardio):
    - "quemé 200 calorías" → calories: 200
@@ -117,6 +148,12 @@ EXAMPLES:
 - Input: "Press de banca 80kg 10 reps 3 series"
   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": 80, "sets": 3, "reps": 10, "rir": null, "notes": null}
 
+- Input: "Press banca 70 kilos"
+  Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": 70, "sets": null, "reps": null, "rir": null, "notes": null}
+
+- Input: "Sentadilla 100kg"
+  Output: {"exercise_name": "Sentadilla", "exercise_type": "strength_weighted", "weight_kg": 100, "sets": null, "reps": null, "rir": null, "notes": null}
+
 - Input: "Bench press 3 sets, 1er set 80 kilos 3 reps, 2 set 3 reps 75 kilos, 3er set 5 reps 75 kilos. Rir 0 en todas"
   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": [80, 75, 75], "sets": 3, "reps": [3, 3, 5], "rir": [0, 0, 0], "notes": null}
 
@@ -124,7 +161,22 @@ EXAMPLES:
   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": null, "sets": 3, "reps": 5, "rir": [1, 0, 0], "notes": null}
 
 - Input: "Press banca 3 sets, set 1: 80kg x 5 reps rir 1, set 2: 75kg x 6 reps rir 0, set 3: 75kg x 5 reps rir 0"
-  Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": [80, 75, 75], "sets": 3, "reps": [5, 6, 5], "rir": [1, 0, 0], "notes": null}
+   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": [80, 75, 75], "sets": 3, "reps": [5, 6, 5], "rir": [1, 0, 0], "notes": null}
+
+- Input: "Press militar 3 series con 60kg, primer set al fallo, segundo una más, tercero dos más"
+   Output: {"exercise_name": "Press Militar", "exercise_type": "strength_weighted", "weight_kg": 60, "sets": 3, "reps": null, "rir": [0, 1, 2], "notes": null}
+
+- Input: "Dominadas 10 reps 3 sets, todas al fallo"
+   Output: {"exercise_name": "Dominadas", "exercise_type": "strength_bodyweight", "weight_kg": null, "sets": 3, "reps": 10, "rir": [0, 0, 0], "notes": null}
+
+- Input: "Curl de biceps 15kg 12 reps 2 series, una más en cada set"
+   Output: {"exercise_name": "Curl de Bíceps", "exercise_type": "strength_weighted", "weight_kg": 15, "sets": 2, "reps": 12, "rir": [1, 1], "notes": null}
+
+- Input: "Sentadilla 100kg 8 reps 3 series rir 2"
+   Output: {"exercise_name": "Sentadilla", "exercise_type": "strength_weighted", "weight_kg": 100, "sets": 3, "reps": 8, "rir": 2, "notes": null}
+
+- Input: "Press banca 80kg 6 reps 4 sets RIR 0"
+   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": 80, "sets": 4, "reps": 6, "rir": 0, "notes": null}
 
 CRITICAL RULES FOR CONVERSATION FLOW:
 

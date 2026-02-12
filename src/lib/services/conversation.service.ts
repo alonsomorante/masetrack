@@ -133,9 +133,11 @@ export class ConversationService {
     message += '• Describe tu entrenamiento directamente\n';
     message += '\n💪 *CÓMO REGISTRAR:*\n';
     message += '\n*Ejercicios de Fuerza:*\n';
-    message += '"Ejercicio + Peso + Reps + Series"\n';
-    message += '• "Press de banca 80kg 10 reps 3 series"\n';
-    message += '• "Dominadas 10 reps 3 series" (peso corporal)\n';
+    message += '"Ejercicio + Peso + Reps + Series + RIR"\n';
+    message += '• "Press de banca 80kg 10 reps 3 series RIR 1"\n';
+    message += '• "Dominadas 10 reps 3 series al fallo"\n';
+    message += '💡 *RIR = Repeticiones en Reserva (0-5)\n';
+    message += '   0 = al fallo, 1 = una más, etc.\n';
     message += '\n*Ejercicios Isométricos:*\n';
     message += '"Ejercicio + Tiempo"\n';
     message += '• "Plancha 60 segundos"\n';
@@ -577,35 +579,106 @@ export class ConversationService {
 
   private async handleWaitingForRir(message: string, context: Record<string, any>): Promise<string> {
     const workout = context.pending_workout as ParsedWorkout;
+    const msgLower = message.toLowerCase().trim();
 
-    if (/^\d$/.test(message) && parseInt(message) >= 0 && parseInt(message) <= 5) {
-      const rirValue = parseInt(message);
-      let rir: number | number[] = rirValue;
-      if (workout.sets && workout.sets > 1) {
-        rir = Array(workout.sets).fill(rirValue);
+    // Check if user is asking what RIR is
+    if (/(qu[eé]|q)\s+(es|significa)\s+(el\s+)?rir|rir\?/.test(msgLower) || 
+        /no\s+s[eé]|ns/.test(msgLower)) {
+      return `💡 *RIR = Repeticiones en Reserva*
+
+Es cuántas repeticiones más podrías haber hecho antes de parar:
+• 0 = Llegaste al fallo (no podías más)
+• 1 = Podías hacer 1 rep más
+• 2-5 = Podías hacer esa cantidad de reps más
+
+¿Cuántas reps te faltaban? (0-5) 💪`;
+    }
+
+    // Check if user provided RIR per set (e.g., "0, 1, 2" or "set 1: 0, set 2: 1")
+    const setPattern = /set\s*(\d+)\s*[:\-]?\s*(\d)/gi;
+    const commaPattern = /(\d)\s*[,\s]+(\d)/;
+    
+    let rirArray: number[] = [];
+    let match;
+    
+    // Try to match "set X: Y" pattern
+    while ((match = setPattern.exec(message)) !== null) {
+      const setNum = parseInt(match[1]) - 1; // 0-indexed
+      const rirValue = parseInt(match[2]);
+      if (rirValue >= 0 && rirValue <= 5) {
+        rirArray[setNum] = rirValue;
+      }
+    }
+    
+    // If no set pattern, try comma-separated values
+    if (rirArray.length === 0 && commaPattern.test(message)) {
+      const values = message.match(/\d/g);
+      if (values) {
+        rirArray = values.map(v => parseInt(v)).filter(v => v >= 0 && v <= 5);
+      }
+    }
+    
+    // Check for single RIR value
+    if (rirArray.length === 0 && /^\d$/.test(message.trim())) {
+      const rirValue = parseInt(message.trim());
+      if (rirValue >= 0 && rirValue <= 5) {
+        const totalSets = workout.sets || 1;
+        rirArray = Array(totalSets).fill(rirValue);
+      }
+    }
+
+    // If we have RIR data (either single or array)
+    if (rirArray.length > 0) {
+      // Fill missing values with default (2) if partial data
+      const totalSets = workout.sets || rirArray.length;
+      const completeRirArray = Array(totalSets).fill(2); // Default to 2
+      
+      for (let i = 0; i < rirArray.length && i < totalSets; i++) {
+        if (rirArray[i] !== undefined) {
+          completeRirArray[i] = rirArray[i];
+        }
       }
       
+      const updatedWorkout = {
+        ...workout,
+        rir: completeRirArray.length === 1 ? completeRirArray[0] : completeRirArray,
+      };
+
       const newContext = {
         ...context,
-        pending_workout: { ...workout, rir },
+        pending_workout: updatedWorkout,
       };
+
+      const exerciseType = updatedWorkout.exercise_type || 'strength_weighted';
+      const exerciseName = updatedWorkout.exercise_name || 'Ejercicio';
+      const isCustom = updatedWorkout.is_custom ?? false;
+      const displayText = this.formatWorkoutDisplay(updatedWorkout, exerciseType, exerciseName, isCustom);
+
       await updateUser(this.user!.phone_number, {
         conversation_state: 'waiting_for_comment',
         conversation_context: newContext,
       });
-      return '¿Comentario? Responde "no" para saltar.';
+      
+      return `${displayText}\n\n¿Comentario? Responde 'no' para saltar.`;
     }
 
-    if (/no\s*s[eé]|ns/i.test(message)) {
-      const newContext = { ...context, pending_workout: { ...workout, rir: null } };
-      await updateUser(this.user!.phone_number, {
-        conversation_state: 'waiting_for_comment',
-        conversation_context: newContext,
-      });
-      return '¿Comentario? Responde "no" para saltar.';
+    // Handle ambiguous responses
+    if (/más\s+o\s+menos|aprox|no\s+estoy\s+seguro|quiz[áa]s|tal\s+vez/.test(msgLower)) {
+      return `🤔 Entiendo que no estás seguro.
+
+¿Cuántas repeticiones más crees que podrías haber hecho? Dame tu mejor estimación (0-5).
+
+💡 *Tip:* Si llegaste al fallo = 0, si te quedó una rep más = 1.`;
     }
 
-    return 'Indica RIR (0-5) o "no sé".';
+    return `⚠️ Necesito saber el RIR (0-5).
+
+Ejemplos:
+• "3" → RIR 3 para todos los sets
+• "0, 1, 2" → Set 1: 0, Set 2: 1, Set 3: 2
+• "set 1: 0, set 2: 1"
+
+💡 Escribe "qué es el RIR" si necesitas ayuda.`;
   }
 
   private async handleWaitingForComment(message: string, context: Record<string, any>): Promise<string> {
