@@ -192,14 +192,83 @@ export const EXERCISES_DATA: ExerciseDataExtended[] = [
   }
 ];
 
+// Helper function to normalize text for fuzzy matching
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove accents
+    .replace(/\b(con|de|en|por|para|del|la|el|los|las|un|una)\b/g, ' ') // Remove common prepositions/articles
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Helper function to calculate word overlap score
+function calculateWordOverlap(searchWords: string[], targetWords: string[]): number {
+  const searchSet = new Set(searchWords);
+  const targetSet = new Set(targetWords);
+  let overlap = 0;
+  
+  for (const word of searchSet) {
+    if (targetSet.has(word)) {
+      overlap += 1;
+    } else {
+      // Check for partial matches (e.g., "curl" matches "curls")
+      for (const targetWord of targetSet) {
+        if (targetWord.includes(word) || word.includes(targetWord)) {
+          overlap += 0.5;
+          break;
+        }
+      }
+    }
+  }
+  
+  return overlap;
+}
+
 export function findExerciseByName(name: string): ExerciseDataExtended | undefined {
   const searchName = name.toLowerCase().trim();
+  const normalizedSearch = normalizeText(searchName);
+  const searchWords = normalizedSearch.split(' ').filter(w => w.length > 0);
   
-  return EXERCISES_DATA.find(exercise => {
+  let bestMatch: ExerciseDataExtended | undefined;
+  let bestScore = 0;
+  const MIN_SCORE_THRESHOLD = 0.5; // At least 50% of words must match
+  
+  for (const exercise of EXERCISES_DATA) {
+    // Check exact matches first
     const nameMatch = exercise.name.toLowerCase() === searchName;
     const aliasMatch = exercise.aliases.some(alias => alias.toLowerCase() === searchName);
-    return nameMatch || aliasMatch;
-  });
+    
+    if (nameMatch || aliasMatch) {
+      return exercise; // Return immediately on exact match
+    }
+    
+    // Fuzzy matching
+    const normalizedExerciseName = normalizeText(exercise.name);
+    const exerciseWords = normalizedExerciseName.split(' ').filter(w => w.length > 0);
+    
+    let maxScore = calculateWordOverlap(searchWords, exerciseWords);
+    
+    // Also check aliases
+    for (const alias of exercise.aliases) {
+      const normalizedAlias = normalizeText(alias);
+      const aliasWords = normalizedAlias.split(' ').filter(w => w.length > 0);
+      const aliasScore = calculateWordOverlap(searchWords, aliasWords);
+      maxScore = Math.max(maxScore, aliasScore);
+    }
+    
+    // Normalize score by the number of search words
+    const normalizedScore = maxScore / Math.max(searchWords.length, 1);
+    
+    if (normalizedScore > bestScore && normalizedScore >= MIN_SCORE_THRESHOLD) {
+      bestScore = normalizedScore;
+      bestMatch = exercise;
+    }
+  }
+  
+  return bestMatch;
 }
 
 export function searchExercises(term: string): ExerciseDataExtended[] {

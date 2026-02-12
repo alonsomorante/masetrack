@@ -35,24 +35,29 @@ Look for keywords in the message:
 EXTRACTION RULES - READ CAREFULLY:
 
 1. EXERCISE NAME EXTRACTION - CRITICAL:
-   - Extract the exercise name from the BEGINNING of the message, BEFORE any numbers/weight/reps
-   - Match against the catalog and aliases. Be FLEXIBLE with:
-     * Typos: "press banca" (missing "de"), "sentadlla" → "sentadilla"
-     * Missing words: "press banca" → "Press de Banca"
-     * Word order: "banca press" → "Press de Banca"
-     * Abbreviations: "dom" → "Dominadas", "plan" → "Plancha"
+    - Extract the exercise name from the BEGINNING of the message, BEFORE any numbers/weight/reps
+    - Match against the catalog and aliases. Be EXTREMELY FLEXIBLE with:
+      * Typos: "press banca" (missing "de"), "sentadlla" → "sentadilla"
+      * Missing words: "press banca" → "Press de Banca"
+      * Word order: "banca press" → "Press de Banca", "barra curl" → "Curl con Barra"
+      * Extra prepositions/articles: "curl con barra" → "Curl con Barra", "press de pecho" → "Press de Banca"
+      * Abbreviations: "dom" → "Dominadas", "plan" → "Plancha", "curl" → "Curl con Barra"
+    - IGNORE these words when matching: con, de, en, por, para, del, la, el, los, las, un, una
     - When message format is "ExerciseName Weight", extract ONLY the exercise name part:
       * "Press de banca 70 kilos" → exercise_name: "Press de Banca", weight_kg: 70
       * "Press banca 80kg" → exercise_name: "Press de Banca", weight_kg: 80
       * "Sentadilla 100kg" → exercise_name: "Sentadilla", weight_kg: 100
       * "Curl con barra 30kg" → exercise_name: "Curl con Barra", weight_kg: 30
       * "Curl barra 25kg" → exercise_name: "Curl con Barra", weight_kg: 25
+      * "curl de biceps 20kg" → exercise_name: "Curl con Barra", weight_kg: 20
     - COMMON EXERCISE MAPPINGS - Use these when you see these terms:
-      * "curl", "curl biceps", "curl con barra", "curl barra" → "Curl con Barra"
+      * "curl", "curl biceps", "curl con barra", "curl barra", "curl de biceps" → "Curl con Barra"
       * "martillo", "curl martillo", "hammer curl" → "Curl Martillo"
-      * "press", "press banca", "pecho" → "Press de Banca"
+      * "press", "press banca", "pecho", "press de pecho" → "Press de Banca"
       * "dominadas", "pull ups", "chin ups" → "Dominadas"
-    - If you can't find an exact match, look for the CLOSEST match in the catalog
+      * "sentadilla", "squat" → "Sentadilla"
+    - For custom exercises: Use the SAME fuzzy matching logic. Match partial words and ignore prepositions.
+    - If you can't find an exact match, look for the CLOSEST match in the catalog based on word overlap
     - Return null ONLY if NO exercise name can be reasonably inferred
 
 2. EXERCISE TYPE: Detect based on context:
