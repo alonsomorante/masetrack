@@ -41,12 +41,19 @@ EXTRACTION RULES - READ CAREFULLY:
      * Missing words: "press banca" → "Press de Banca"
      * Word order: "banca press" → "Press de Banca"
      * Abbreviations: "dom" → "Dominadas", "plan" → "Plancha"
-   - When message format is "ExerciseName Weight", extract ONLY the exercise name part:
-     * "Press de banca 70 kilos" → exercise_name: "Press de Banca", weight_kg: 70
-     * "Press banca 80kg" → exercise_name: "Press de Banca", weight_kg: 80
-     * "Sentadilla 100kg" → exercise_name: "Sentadilla", weight_kg: 100
-   - If you can't find an exact match, look for the CLOSEST match in the catalog
-   - Return null ONLY if NO exercise name can be reasonably inferred
+    - When message format is "ExerciseName Weight", extract ONLY the exercise name part:
+      * "Press de banca 70 kilos" → exercise_name: "Press de Banca", weight_kg: 70
+      * "Press banca 80kg" → exercise_name: "Press de Banca", weight_kg: 80
+      * "Sentadilla 100kg" → exercise_name: "Sentadilla", weight_kg: 100
+      * "Curl con barra 30kg" → exercise_name: "Curl con Barra", weight_kg: 30
+      * "Curl barra 25kg" → exercise_name: "Curl con Barra", weight_kg: 25
+    - COMMON EXERCISE MAPPINGS - Use these when you see these terms:
+      * "curl", "curl biceps", "curl con barra", "curl barra" → "Curl con Barra"
+      * "martillo", "curl martillo", "hammer curl" → "Curl Martillo"
+      * "press", "press banca", "pecho" → "Press de Banca"
+      * "dominadas", "pull ups", "chin ups" → "Dominadas"
+    - If you can't find an exact match, look for the CLOSEST match in the catalog
+    - Return null ONLY if NO exercise name can be reasonably inferred
 
 2. EXERCISE TYPE: Detect based on context:
    - If message has time units (segundos/minutos) but NO reps → type: "isometric_time" or "cardio_time"
@@ -152,7 +159,16 @@ EXAMPLES:
   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": 70, "sets": null, "reps": null, "rir": null, "notes": null}
 
 - Input: "Sentadilla 100kg"
-  Output: {"exercise_name": "Sentadilla", "exercise_type": "strength_weighted", "weight_kg": 100, "sets": null, "reps": null, "rir": null, "notes": null}
+   Output: {"exercise_name": "Sentadilla", "exercise_type": "strength_weighted", "weight_kg": 100, "sets": null, "reps": null, "rir": null, "notes": null}
+
+- Input: "Curl con barra 30kg 12 reps 3 series"
+   Output: {"exercise_name": "Curl con Barra", "exercise_type": "strength_weighted", "weight_kg": 30, "sets": 3, "reps": 12, "rir": null, "notes": null}
+
+- Input: "curl barra 25kg 10 reps"
+   Output: {"exercise_name": "Curl con Barra", "exercise_type": "strength_weighted", "weight_kg": 25, "sets": null, "reps": 10, "rir": null, "notes": null}
+
+- Input: "Curl de biceps con barra 20 kilos"
+   Output: {"exercise_name": "Curl con Barra", "exercise_type": "strength_weighted", "weight_kg": 20, "sets": null, "reps": null, "rir": null, "notes": null}
 
 - Input: "Bench press 3 sets, 1er set 80 kilos 3 reps, 2 set 3 reps 75 kilos, 3er set 5 reps 75 kilos. Rir 0 en todas"
   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": [80, 75, 75], "sets": 3, "reps": [3, 3, 5], "rir": [0, 0, 0], "notes": null}
