@@ -2,6 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ConversationService } from '@/lib/services/conversation.service';
 import { sendWhatsAppMessage } from '@/lib/services/twilio.service';
 
+// Helper para crear respuesta TwiML (XML que Twilio espera)
+function createTwiMLResponse(message?: string): Response {
+  const twiml = message 
+    ? `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${message}</Message></Response>`
+    : `<?xml version="1.0" encoding="UTF-8"?><Response></Response>`;
+  
+  return new Response(twiml, {
+    headers: { 'Content-Type': 'text/xml' },
+  });
+}
+
 export async function POST(request: NextRequest) {
   let phoneNumber = '';
   
@@ -16,7 +27,7 @@ export async function POST(request: NextRequest) {
 
     if (!from || !body) {
       console.log('❌ Faltan campos');
-      return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
+      return createTwiMLResponse('❌ Error: Datos incompletos');
     }
 
     phoneNumber = from.replace('whatsapp:', '').trim();
@@ -37,7 +48,8 @@ export async function POST(request: NextRequest) {
     await sendWhatsAppMessage(phoneNumber, responseMessage);
     console.log('✅ Mensaje enviado exitosamente');
 
-    return NextResponse.json({ success: true });
+    // Twilio espera TwiML (XML), no JSON
+    return createTwiMLResponse();
   } catch (error) {
     console.error('❌ Error en webhook:', error);
     console.error('Stack:', error instanceof Error ? error.stack : 'No stack');
@@ -51,9 +63,7 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    return NextResponse.json({ 
-      error: 'Server error',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
+    // Twilio espera TwiML incluso en errores
+    return createTwiMLResponse('❌ Error interno. Por favor intenta de nuevo.');
   }
 }
