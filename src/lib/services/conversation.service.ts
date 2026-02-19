@@ -8,7 +8,7 @@ import {
   createCustomExercise,
   getCustomExerciseByName,
 } from '@/lib/supabase/client';
-import { parseWorkoutMessage } from '@/lib/services/claude.service';
+import { parseWorkoutMessage, parseFollowUpResponse } from '@/lib/services/claude.service';
 import { findExerciseByName, getExercisesListText, EXERCISES_DATA, getExercisesByMuscleGroup, ExerciseDataExtended } from '@/lib/data/exercises.catalog';
 
 export class ConversationService {
@@ -19,6 +19,7 @@ export class ConversationService {
     HELP: ['hola', 'ayuda', 'help', 'menu', 'comandos', 'info'],
     EXERCISES: ['ejercicios', 'lista', 'catalogo', 'catálogo'],
     WEB: ['web', 'dashboard', 'link', 'enlace', 'url'],
+    CANCEL: ['cancelar', 'cancel', 'borrar', 'eliminar', 'borra', 'nuevo', 'otro'],
   };
 
   // Helper function to format reps for display
@@ -130,6 +131,7 @@ export class ConversationService {
     message += '\n\n📋 *COMANDOS DISPONIBLES:*\n';
     message += '• "ejercicios" - Ver lista de ejercicios\n';
     message += '• "web" - Obtener link del dashboard\n';
+    message += '• "cancelar" - Cancelar registro actual\n';
     message += '• Describe tu entrenamiento directamente\n';
     message += '\n💪 *CÓMO REGISTRAR:*\n';
     message += '\n*Ejercicios de Fuerza:*\n';
@@ -234,7 +236,14 @@ export class ConversationService {
         }
       }
 
+      // Comando cancelar - funciona en cualquier estado de registro de entrenamiento
+      if (this.isCommand(message, this.COMMANDS.CANCEL)) {
+        return this.handleCancelRegistration();
+      }
+
       switch (state) {
+        case 'pending_verification':
+          return this.handlePendingVerification();
         case 'new_user':
           return this.handleNewUser(message);
         case 'registration_complete':
@@ -242,6 +251,8 @@ export class ConversationService {
           return this.handleWorkoutInput(message, context);
         case 'waiting_for_weight':
           return this.handleWaitingForWeight(message, context);
+        case 'waiting_for_reps_and_sets':
+          return this.handleWaitingForRepsAndSets(message, context);
         case 'waiting_for_rir':
           return this.handleWaitingForRir(message, context);
         case 'waiting_for_comment':
@@ -383,25 +394,64 @@ export class ConversationService {
     // Validate based on exercise type
     const validation = this.validateExerciseData(parsed, exerciseType);
     if (!validation.valid) {
-      if (validation.reason === 'missing_weight' && exerciseType === 'strength_weighted') {
-        const newContext = {
-          ...context,
-          pending_workout: {
-            ...parsed,
-            exercise_name: exerciseName,
-            exercise_type: exerciseType,
-            is_custom: isCustom,
-            custom_exercise_id: isCustom ? exercise.id : null
-          },
-        };
+      const newContext = {
+        ...context,
+        pending_workout: {
+          ...parsed,
+          exercise_name: exerciseName,
+          exercise_type: exerciseType,
+          is_custom: isCustom,
+          custom_exercise_id: isCustom ? exercise.id : null
+        },
+      };
 
+      // Check if we have some data already
+      const hasWeight = parsed.weight_kg !== null && parsed.weight_kg !== undefined;
+      const hasReps = parsed.reps !== null && parsed.reps !== undefined;
+      const hasSets = parsed.sets !== null && parsed.sets !== undefined;
+      const hasRir = parsed.rir !== null && parsed.rir !== undefined;
+      
+      // Build dynamic message for missing fields
+      const missingFields: string[] = [];
+      if (!hasReps) missingFields.push('reps');
+      if (!hasSets) missingFields.push('series');
+      if (!hasRir) missingFields.push('RIR');
+      
+      const missingText = missingFields.join(', ');
+      const exampleParts: string[] = [];
+      if (!hasReps) exampleParts.push('10 reps');
+      if (!hasSets) exampleParts.push('3 series');
+      if (!hasRir) exampleParts.push('RIR 2');
+      const exampleText = exampleParts.join(' ');
+      
+      if (exerciseType === 'strength_weighted') {
+        if (!hasWeight) {
+          // First ask for weight
+          await updateUser(this.user!.phone_number, {
+            conversation_state: 'waiting_for_weight',
+            conversation_context: newContext,
+          });
+          return `${validation.message}\n\n¿Cuántos kg usaste?`;
+        } else {
+          // Have weight, ask for remaining fields
+          await updateUser(this.user!.phone_number, {
+            conversation_state: 'waiting_for_reps_and_sets',
+            conversation_context: newContext,
+          });
+          
+          const displayText = this.formatWorkoutDisplay(parsed, exerciseType, exerciseName, isCustom);
+          return `${displayText}\n\n💪 Necesito: ${missingText}\nEjemplo: "${exampleText}"`;
+        }
+      } else if (exerciseType === 'strength_bodyweight') {
         await updateUser(this.user!.phone_number, {
-          conversation_state: 'waiting_for_weight',
+          conversation_state: 'waiting_for_reps_and_sets',
           conversation_context: newContext,
         });
-
-        return `${validation.message}\n\n¿Cuántos kg usaste?`;
+        
+        const displayText = this.formatWorkoutDisplay(parsed, exerciseType, exerciseName, isCustom);
+        return `${displayText}\n\n💪 Necesito: ${missingText}\nEjemplo: "${exampleText}"`;
       }
+      
       return validation.message;
     }
 
@@ -436,7 +486,7 @@ export class ConversationService {
     return `${displayText}\n\n¿Comentario? Responde 'no' para saltar.`;
   }
 
-  private validateExerciseData(parsed: ParsedWorkout, exerciseType: string): { valid: boolean; message: string; reason?: 'missing_weight' } {
+  private validateExerciseData(parsed: ParsedWorkout, exerciseType: string): { valid: boolean; message: string; missingFields: string[] } {
     const hasValidWeight = (weight: number | number[] | null): boolean => {
       if (weight === null) return false;
       if (Array.isArray(weight)) {
@@ -445,28 +495,50 @@ export class ConversationService {
       return weight > 0;
     };
 
+    const missingFields: string[] = [];
+
     switch (exerciseType) {
       case 'strength_weighted':
         if (!hasValidWeight(parsed.weight_kg)) {
-          return {
-            valid: false,
-            reason: 'missing_weight',
-            message: `⚠️ Falta el peso.\n\nEjemplo: "Press de banca 80kg 10 reps 3 series"`
-          };
+          missingFields.push('peso');
         }
         if (!parsed.reps) {
+          missingFields.push('reps');
+        }
+        if (!parsed.sets) {
+          missingFields.push('series');
+        }
+        if (parsed.rir === null) {
+          missingFields.push('RIR');
+        }
+        
+        if (missingFields.length > 0) {
+          const missingText = missingFields.join(', ');
           return {
             valid: false,
-            message: `⚠️ Faltan las repeticiones.\n\nEjemplo: "Press de banca 80kg 10 reps 3 series"`
+            missingFields,
+            message: `⚠️ Falta: ${missingText}.\n\nEjemplo: "Press de banca 80kg 10 reps 3 series RIR 2"`
           };
         }
         break;
         
       case 'strength_bodyweight':
         if (!parsed.reps) {
+          missingFields.push('reps');
+        }
+        if (!parsed.sets) {
+          missingFields.push('series');
+        }
+        if (parsed.rir === null) {
+          missingFields.push('RIR');
+        }
+        
+        if (missingFields.length > 0) {
+          const missingText = missingFields.join(', ');
           return {
             valid: false,
-            message: `⚠️ Faltan las repeticiones.\n\nEjemplo: "Dominadas 10 reps 3 series"`
+            missingFields,
+            message: `⚠️ Falta: ${missingText}.\n\nEjemplo: "Dominadas 10 reps 3 series RIR 2"`
           };
         }
         break;
@@ -474,8 +546,13 @@ export class ConversationService {
       case 'isometric_time':
       case 'cardio_time':
         if (!parsed.duration_seconds) {
+          missingFields.push('duración');
+        }
+        
+        if (missingFields.length > 0) {
           return {
             valid: false,
+            missingFields,
             message: `⚠️ Falta la duración.\n\nEjemplo: "Plancha 60 segundos" o "Caminadora 30 minutos"`
           };
         }
@@ -483,15 +560,20 @@ export class ConversationService {
         
       case 'cardio_distance':
         if (!parsed.distance_km) {
+          missingFields.push('distancia');
+        }
+        
+        if (missingFields.length > 0) {
           return {
             valid: false,
+            missingFields,
             message: `⚠️ Falta la distancia.\n\nEjemplo: "Correr 5 kilómetros"`
           };
         }
         break;
     }
     
-    return { valid: true, message: '' };
+    return { valid: true, message: '', missingFields: [] };
   }
 
   private formatWorkoutDisplay(parsed: ParsedWorkout, exerciseType: string, exerciseName: string, isCustom: boolean): string {
@@ -562,28 +644,42 @@ export class ConversationService {
     const isCustom = updatedWorkout.is_custom ?? false;
     const displayText = this.formatWorkoutDisplay(updatedWorkout, exerciseType, exerciseName, isCustom);
 
-    if (exerciseType.includes('strength') && updatedWorkout.rir === null) {
-      await updateUser(this.user!.phone_number, {
-        conversation_state: 'waiting_for_rir',
-        conversation_context: newContext,
-      });
-      return `${displayText}\n\n¿RIR (0-5) o "no sé"?`;
-    }
+    // Check which fields are still missing
+    const hasReps = updatedWorkout.reps !== null && updatedWorkout.reps !== undefined;
+    const hasSets = updatedWorkout.sets !== null && updatedWorkout.sets !== undefined;
+    const hasRir = updatedWorkout.rir !== null && updatedWorkout.rir !== undefined;
+    
+    const missingFields: string[] = [];
+    if (!hasReps) missingFields.push('reps');
+    if (!hasSets) missingFields.push('series');
+    if (!hasRir) missingFields.push('RIR');
+    
+    const missingText = missingFields.join(', ');
+    const exampleParts: string[] = [];
+    if (!hasReps) exampleParts.push('10 reps');
+    if (!hasSets) exampleParts.push('3 series');
+    if (!hasRir) exampleParts.push('RIR 2');
+    const exampleText = exampleParts.join(' ');
 
+    // Ask for all remaining data at once
     await updateUser(this.user!.phone_number, {
-      conversation_state: 'waiting_for_comment',
+      conversation_state: 'waiting_for_reps_and_sets',
       conversation_context: newContext,
     });
-    return `${displayText}\n\n¿Comentario? Responde 'no' para saltar.`;
+    
+    return `${displayText}\n\n💪 Ahora necesito: ${missingText}\nEjemplo: "${exampleText}"`;
   }
 
-  private async handleWaitingForRir(message: string, context: Record<string, any>): Promise<string> {
-    const workout = context.pending_workout as ParsedWorkout;
-    const msgLower = message.toLowerCase().trim();
+  private async handleWaitingForRepsAndSets(message: string, context: Record<string, any>): Promise<string> {
+    const workout = context.pending_workout as ParsedWorkout | undefined;
 
-    // Check if user is asking what RIR is
-    if (/(qu[eé]|q)\s+(es|significa)\s+(el\s+)?rir|rir\?/.test(msgLower) || 
-        /no\s+s[eé]|ns/.test(msgLower)) {
+    if (!workout) {
+      return 'Hubo un problema. Describe tu entrenamiento de nuevo.';
+    }
+
+    const parseResult = await parseFollowUpResponse(message, workout);
+
+    if (parseResult.clarification_needed === 'explain_rir') {
       return `💡 *RIR = Repeticiones en Reserva*
 
 Es cuántas repeticiones más podrías haber hecho antes de parar:
@@ -594,56 +690,68 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
 ¿Cuántas reps te faltaban? (0-5) 💪`;
     }
 
-    // Check if user provided RIR per set (e.g., "0, 1, 2" or "set 1: 0, set 2: 1")
-    const setPattern = /set\s*(\d+)\s*[:\-]?\s*(\d)/gi;
-    const commaPattern = /(\d)\s*[,\s]+(\d)/;
-    
-    let rirArray: number[] = [];
-    let match;
-    
-    // Try to match "set X: Y" pattern
-    while ((match = setPattern.exec(message)) !== null) {
-      const setNum = parseInt(match[1]) - 1; // 0-indexed
-      const rirValue = parseInt(match[2]);
-      if (rirValue >= 0 && rirValue <= 5) {
-        rirArray[setNum] = rirValue;
-      }
-    }
-    
-    // If no set pattern, try comma-separated values
-    if (rirArray.length === 0 && commaPattern.test(message)) {
-      const values = message.match(/\d/g);
-      if (values) {
-        rirArray = values.map(v => parseInt(v)).filter(v => v >= 0 && v <= 5);
-      }
-    }
-    
-    // Check for single RIR value
-    if (rirArray.length === 0 && /^\d$/.test(message.trim())) {
-      const rirValue = parseInt(message.trim());
-      if (rirValue >= 0 && rirValue <= 5) {
-        const totalSets = workout.sets || 1;
-        rirArray = Array(totalSets).fill(rirValue);
-      }
-    }
+    const updatedWorkout = parseResult.merged;
+    const missingFields = parseResult.missing_fields;
 
-    // If we have RIR data (either single or array)
-    if (rirArray.length > 0) {
-      // Fill missing values with default (2) if partial data
-      const totalSets = workout.sets || rirArray.length;
-      const completeRirArray = Array(totalSets).fill(2); // Default to 2
-      
-      for (let i = 0; i < rirArray.length && i < totalSets; i++) {
-        if (rirArray[i] !== undefined) {
-          completeRirArray[i] = rirArray[i];
-        }
-      }
-      
-      const updatedWorkout = {
-        ...workout,
-        rir: completeRirArray.length === 1 ? completeRirArray[0] : completeRirArray,
+    if (!parseResult.is_complete) {
+      const missingText = missingFields.join(', ');
+      const exampleParts: string[] = [];
+      if (missingFields.includes('reps')) exampleParts.push('10 reps');
+      if (missingFields.includes('sets')) exampleParts.push('3 series');
+      if (missingFields.includes('rir')) exampleParts.push('RIR 2');
+      const exampleText = exampleParts.join(' ');
+
+      const newContext = {
+        ...context,
+        pending_workout: updatedWorkout,
       };
 
+      await updateUser(this.user!.phone_number, {
+        conversation_context: newContext,
+      });
+
+      return `⚠️ Aún falta: ${missingText}\n\n` +
+             `Ejemplo: "${exampleText}"\n` +
+             `O escribe todos los datos juntos.`;
+    }
+
+    const newContext = {
+      ...context,
+      pending_workout: updatedWorkout,
+    };
+
+    const exerciseType = updatedWorkout.exercise_type || 'strength_weighted';
+    const exerciseName = updatedWorkout.exercise_name || 'Ejercicio';
+    const isCustom = updatedWorkout.is_custom ?? false;
+    const displayText = this.formatWorkoutDisplay(updatedWorkout, exerciseType, exerciseName, isCustom);
+
+    await updateUser(this.user!.phone_number, {
+      conversation_state: 'waiting_for_comment',
+      conversation_context: newContext,
+    });
+
+    return `${displayText}\n\n¿Comentario? Responde 'no' para saltar.`;
+  }
+
+  private async handleWaitingForRir(message: string, context: Record<string, any>): Promise<string> {
+    const workout = context.pending_workout as ParsedWorkout;
+
+    const parseResult = await parseFollowUpResponse(message, workout);
+
+    if (parseResult.clarification_needed === 'explain_rir') {
+      return `💡 *RIR = Repeticiones en Reserva*
+
+Es cuántas repeticiones más podrías haber hecho antes de parar:
+• 0 = Llegaste al fallo (no podías más)
+• 1 = Podías hacer 1 rep más
+• 2-5 = Podías hacer esa cantidad de reps más
+
+¿Cuántas reps te faltaban? (0-5) 💪`;
+    }
+
+    const updatedWorkout = parseResult.merged;
+
+    if (parseResult.is_complete) {
       const newContext = {
         ...context,
         pending_workout: updatedWorkout,
@@ -658,11 +766,20 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
         conversation_state: 'waiting_for_comment',
         conversation_context: newContext,
       });
-      
+
       return `${displayText}\n\n¿Comentario? Responde 'no' para saltar.`;
     }
 
-    // Handle ambiguous responses
+    const newContext = {
+      ...context,
+      pending_workout: updatedWorkout,
+    };
+
+    await updateUser(this.user!.phone_number, {
+      conversation_context: newContext,
+    });
+
+    const msgLower = message.toLowerCase().trim();
     if (/más\s+o\s+menos|aprox|no\s+estoy\s+seguro|quiz[áa]s|tal\s+vez/.test(msgLower)) {
       return `🤔 Entiendo que no estás seguro.
 
@@ -676,7 +793,7 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
 Ejemplos:
 • "3" → RIR 3 para todos los sets
 • "0, 1, 2" → Set 1: 0, Set 2: 1, Set 3: 2
-• "set 1: 0, set 2: 1"
+• "RIR 1 en el primer set RIR 0 en los otros"
 
 💡 Escribe "qué es el RIR" si necesitas ayuda.`;
   }
@@ -915,5 +1032,24 @@ Ejemplos:
       conversation_context: {},
     });
     return 'Hubo un problema. Volvamos a empezar. Describe tu entrenamiento.';
+  }
+
+  private async handlePendingVerification(): Promise<string> {
+    return '⚠️ *Verificación requerida*\n\n' +
+           'Necesitas verificar tu cuenta antes de usar WhatsApp.\n\n' +
+           '1. Accede a: https://workout-wsp-tracker.vercel.app\n' +
+           '2. Ingresa el código de verificación que recibiste por SMS\n' +
+           '3. Una vez verificado, podrás usar el bot de WhatsApp\n\n' +
+           '¿No recibiste el SMS? Verifica tu número en la web.';
+  }
+
+  private async handleCancelRegistration(): Promise<string> {
+    await updateUser(this.user!.phone_number, {
+      conversation_state: 'registration_complete',
+      conversation_context: {},
+    });
+    return '❌ Registro cancelado.\n\n' +
+           'Puedes empezar de nuevo con otro ejercicio.\n' +
+           'Escribe el nombre del ejercicio seguido de los datos.';
   }
 }

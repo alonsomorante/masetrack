@@ -43,13 +43,19 @@ EXTRACTION RULES - READ CAREFULLY:
       * Extra prepositions/articles: "curl con barra" → "Curl con Barra", "press de pecho" → "Press de Banca"
       * Abbreviations: "dom" → "Dominadas", "plan" → "Plancha", "curl" → "Curl con Barra"
     - IGNORE these words when matching: con, de, en, por, para, del, la, el, los, las, un, una
-    - When message format is "ExerciseName Weight", extract ONLY the exercise name part:
-      * "Press de banca 70 kilos" → exercise_name: "Press de Banca", weight_kg: 70
-      * "Press banca 80kg" → exercise_name: "Press de Banca", weight_kg: 80
-      * "Sentadilla 100kg" → exercise_name: "Sentadilla", weight_kg: 100
-      * "Curl con barra 30kg" → exercise_name: "Curl con Barra", weight_kg: 30
-      * "Curl barra 25kg" → exercise_name: "Curl con Barra", weight_kg: 25
-      * "curl de biceps 20kg" → exercise_name: "Curl con Barra", weight_kg: 20
+    - **SEPARATE EXERCISE NAME FROM WEIGHT/NUMBERS** - This is CRITICAL:
+      * "Bench press 80 kilos" → exercise_name: "Press de Banca", weight_kg: 80 (NOT "Bench press 80")
+      * "Press de banca 70 kilos" → exercise_name: "Press de Banca", weight_kg: 70 (NOT "Press de banca 70")
+      * "Press banca 80kg" → exercise_name: "Press de Banca", weight_kg: 80 (NOT "Press banca 80")
+      * "Sentadilla 100kg" → exercise_name: "Sentadilla", weight_kg: 100 (NOT "Sentadilla 100")
+      * "Curl con barra 30kg" → exercise_name: "Curl con Barra", weight_kg: 30 (NOT "Curl con barra 30")
+      * "Curl barra 25kg" → exercise_name: "Curl con Barra", weight_kg: 25 (NOT "Curl barra 25")
+      * "curl de biceps 20kg" → exercise_name: "Curl con Barra", weight_kg: 20 (NOT "curl de biceps 20")
+    - STOP reading the exercise name when you encounter:
+      * Any number (80, 100, etc.)
+      * Weight units (kg, kilos, lbs, pounds)
+      * Rep indicators (reps, repeticiones)
+      * Set indicators (sets, series)
     - COMMON EXERCISE MAPPINGS - Use these when you see these terms:
       * "curl", "curl biceps", "curl con barra", "curl barra", "curl de biceps" → "Curl con Barra"
       * "martillo", "curl martillo", "hammer curl" → "Curl Martillo"
@@ -175,11 +181,14 @@ EXAMPLES:
 - Input: "Curl de biceps con barra 20 kilos"
    Output: {"exercise_name": "Curl con Barra", "exercise_type": "strength_weighted", "weight_kg": 20, "sets": null, "reps": null, "rir": null, "notes": null}
 
-- Input: "Bench press 3 sets, 1er set 80 kilos 3 reps, 2 set 3 reps 75 kilos, 3er set 5 reps 75 kilos. Rir 0 en todas"
-  Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": [80, 75, 75], "sets": 3, "reps": [3, 3, 5], "rir": [0, 0, 0], "notes": null}
+ - Input: "bench press 80 kilos"
+   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": 80, "sets": null, "reps": null, "rir": null, "notes": null}
 
-- Input: "bench press 3 sets, 1er set 5 reps rir 1, 2do y 3er set rir 0"
-  Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": null, "sets": 3, "reps": 5, "rir": [1, 0, 0], "notes": null}
+ - Input: "Bench press 3 sets, 1er set 80 kilos 3 reps, 2 set 3 reps 75 kilos, 3er set 5 reps 75 kilos. Rir 0 en todas"
+   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": [80, 75, 75], "sets": 3, "reps": [3, 3, 5], "rir": [0, 0, 0], "notes": null}
+ 
+ - Input: "bench press 3 sets, 1er set 5 reps rir 1, 2do y 3er set rir 0"
+   Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": null, "sets": 3, "reps": 5, "rir": [1, 0, 0], "notes": null}
 
 - Input: "Press banca 3 sets, set 1: 80kg x 5 reps rir 1, set 2: 75kg x 6 reps rir 0, set 3: 75kg x 5 reps rir 0"
    Output: {"exercise_name": "Press de Banca", "exercise_type": "strength_weighted", "weight_kg": [80, 75, 75], "sets": 3, "reps": [5, 6, 5], "rir": [1, 0, 0], "notes": null}
@@ -279,13 +288,27 @@ CRITICAL RULES FOR CONVERSATION FLOW:
     });
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    console.log('🤖 Claude raw response:', text);
+    
     const jsonMatch = text.match(/\{[^}]+\}/);
     
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+      console.log('📊 Parsed workout:', JSON.stringify(parsed, null, 2));
+      
+      // Clean exercise name - remove weight/reps that might have been included
+      let exerciseName = parsed.exercise_name;
+      if (exerciseName) {
+        // Remove numbers followed by kg, kilos, kilo, lbs, etc.
+        exerciseName = exerciseName.replace(/\s+\d+\s*(kg|kilo|kilos|lbs|lb|pounds?)\b/gi, '');
+        // Remove standalone numbers at the end
+        exerciseName = exerciseName.replace(/\s+\d+$/g, '');
+        // Trim whitespace
+        exerciseName = exerciseName.trim();
+        console.log('🧹 Cleaned exercise name:', exerciseName);
+      }
       
       // Find the exercise in catalog to check if type is ambiguous
-      const exerciseName = parsed.exercise_name;
       const exercise = EXERCISES_DATA.find(ex => 
         ex.name.toLowerCase() === exerciseName?.toLowerCase() ||
         ex.aliases.some(alias => alias.toLowerCase() === exerciseName?.toLowerCase())
@@ -354,4 +377,214 @@ CRITICAL RULES FOR CONVERSATION FLOW:
       is_ambiguous: false
     };
   }
+}
+
+export interface FollowUpParseResult {
+  extracted: {
+    reps: number | number[] | null;
+    sets: number | null;
+    rir: number | number[] | null;
+    weight_kg: number | number[] | null;
+    duration_seconds: number | null;
+    distance_km: number | null;
+  };
+  merged: ParsedWorkout;
+  is_complete: boolean;
+  missing_fields: string[];
+  clarification_needed: string | null;
+}
+
+export async function parseFollowUpResponse(
+  message: string,
+  pendingWorkout: ParsedWorkout
+): Promise<FollowUpParseResult> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY is missing.');
+  }
+
+  const anthropic = new Anthropic({ apiKey });
+
+  const pendingWorkoutJson = JSON.stringify(pendingWorkout, null, 2);
+
+  const systemPrompt = `You are a parser that extracts workout data from user follow-up responses.
+
+## Context
+The user is in the middle of registering a workout. They have already provided some data. Your job is to:
+1. Extract NEW data from their response
+2. Combine with existing data
+3. Determine if complete or what is missing
+
+## Existing Data (pending_workout)
+${pendingWorkoutJson}
+
+## EXTRACTION PATTERNS (Reference):
+
+### Reps
+- "10 reps", "10 repeticiones", "10" → reps: 10
+
+### Sets
+- "3 sets", "3 series", "3" → sets: 3
+
+### RIR (0-5)
+- Simple: "RIR 2", "rir: 2", "2" → rir: 2
+- Per-set: "set 1: 0, set 2: 1" → rir: [0, 1]
+- Natural: "al fallo" → 0, "una más" → 1, "dos más" → 2
+- "RIR 1 en el primer set RIR 0 en los otros" → [1, 0, 0]
+- "set 1 rir 2, los otros rir 1" → [2, 1, 1]
+- Ordinal: "primer set rir 0", "segundo set rir 1"
+
+### Weight
+- "80kg", "80 kilos", "80" → weight_kg: 80
+- Per-set: "set 1: 80kg, set 2: 75kg" → [80, 75]
+
+### Duration
+- "60 segundos" → 60
+- "2 minutos" → 120
+
+### Distance
+- "5 km" → 5
+
+## RULES:
+1. If single number and reps already defined → assume it's sets
+2. If single value (RIR), apply to ALL sets
+3. If partial per-set data, fill remaining with last value
+4. "los otros"/"los demás" → apply to remaining sets
+5. If user asks "qué es RIR?" or "no sé" → set clarification_needed: "explain_rir"
+6. RIR must be 0-5, ignore invalid values
+
+## EXAMPLES:
+
+**Existing:** {exercise_name: "Press Banca", weight_kg: 80, sets: null, reps: null, rir: null}
+**User says:** "10 reps 3 series"
+**Result:**
+{
+  "extracted": { "reps": 10, "sets": 3 },
+  "merged": { "exercise_name": "Press Banca", "weight_kg": 80, "sets": 3, "reps": 10, "rir": null },
+  "is_complete": false,
+  "missing_fields": ["rir"],
+  "clarification_needed": null
+}
+
+**Existing:** {exercise_name: "Press Banca", weight_kg: 80, sets: 3, reps: 10, rir: null}
+**User says:** "RIR 1 en el primer set RIR 0 en los otros"
+**Result:**
+{
+  "extracted": { "rir": [1, 0, 0] },
+  "merged": { "exercise_name": "Press Banca", "weight_kg": 80, "sets": 3, "reps": 10, "rir": [1, 0, 0] },
+  "is_complete": true,
+  "missing_fields": [],
+  "clarification_needed": null
+}
+
+**Existing:** {exercise_name: "Press Banca", weight_kg: 80, sets: 3, reps: 10, rir: null}
+**User says:** "Qué es el RIR?"
+**Result:**
+{
+  "extracted": {},
+  "merged": { "exercise_name": "Press Banca", "weight_kg": 80, "sets": 3, "reps": 10, "rir": null },
+  "is_complete": false,
+  "missing_fields": ["rir"],
+  "clarification_needed": "explain_rir"
+}
+
+## OUTPUT:
+Return ONLY valid JSON with this structure:
+{
+  "extracted": { "reps": null, "sets": null, "rir": null, "weight_kg": null, "duration_seconds": null, "distance_km": null },
+  "merged": { ...merged workout object... },
+  "is_complete": boolean,
+  "missing_fields": string[],
+  "clarification_needed": string | null
+}`;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-3-haiku-20240307',
+      max_tokens: 600,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: message }],
+    });
+
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    console.log('🤖 Claude follow-up raw response:', text);
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      console.log('📊 Follow-up parsed result:', JSON.stringify(parsed, null, 2));
+
+      return {
+        extracted: {
+          reps: parsed.extracted?.reps ?? null,
+          sets: parsed.extracted?.sets ?? null,
+          rir: parsed.extracted?.rir ?? null,
+          weight_kg: parsed.extracted?.weight_kg ?? null,
+          duration_seconds: parsed.extracted?.duration_seconds ?? null,
+          distance_km: parsed.extracted?.distance_km ?? null,
+        },
+        merged: parsed.merged || pendingWorkout,
+        is_complete: parsed.is_complete || false,
+        missing_fields: parsed.missing_fields || [],
+        clarification_needed: parsed.clarification_needed || null,
+      };
+    }
+
+    return {
+      extracted: {
+        reps: null,
+        sets: null,
+        rir: null,
+        weight_kg: null,
+        duration_seconds: null,
+        distance_km: null,
+      },
+      merged: pendingWorkout,
+      is_complete: false,
+      missing_fields: getMissingFields(pendingWorkout),
+      clarification_needed: null,
+    };
+  } catch (error) {
+    console.error('Error calling Claude for follow-up:', error);
+    return {
+      extracted: {
+        reps: null,
+        sets: null,
+        rir: null,
+        weight_kg: null,
+        duration_seconds: null,
+        distance_km: null,
+      },
+      merged: pendingWorkout,
+      is_complete: false,
+      missing_fields: getMissingFields(pendingWorkout),
+      clarification_needed: null,
+    };
+  }
+}
+
+function getMissingFields(workout: ParsedWorkout): string[] {
+  const fields: string[] = [];
+  const type = workout.exercise_type;
+
+  if (type === 'strength_weighted') {
+    if (!workout.weight_kg) fields.push('weight_kg');
+  }
+  if (type === 'strength_weighted' || type === 'strength_bodyweight') {
+    if (!workout.reps) fields.push('reps');
+    if (!workout.sets) fields.push('sets');
+    if (!workout.rir) fields.push('rir');
+  }
+  if (type === 'isometric_time' || type === 'cardio_time') {
+    if (!workout.duration_seconds) fields.push('duration_seconds');
+  }
+  if (type === 'cardio_distance' || type === 'cardio_both') {
+    if (!workout.distance_km) fields.push('distance_km');
+  }
+  if (type === 'cardio_both') {
+    if (!workout.duration_seconds) fields.push('duration_seconds');
+  }
+
+  return fields;
 }
