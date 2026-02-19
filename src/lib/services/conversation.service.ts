@@ -251,6 +251,29 @@ export class ConversationService {
           console.log('📝 Usuario quiere crear un nuevo ejercicio');
           // Continuar al handleWorkoutInput normal
         }
+
+        // Detectar intención de nuevo registro/reinicio - limpiar contexto si hay datos residuales
+        const newRegistrationPatterns = [
+          /nuevo\s+(registro|ejercicio|entrenamiento)/i,
+          /iniciar\s+(nuevo|otro)/i,
+          /empezar\s+(nuevo|otro|de\s+nuevo)/i,
+          /quiero\s+(hacer|registrar)\s+(otro|nuevo)/i,
+          /^nuevo$/i,
+          /^otro$/i,
+          /^reiniciar$/i,
+        ];
+
+        const wantsNewRegistration = newRegistrationPatterns.some(pattern => pattern.test(message));
+        
+        if (wantsNewRegistration && context.pending_workout) {
+          console.log('🆕 Usuario quiere iniciar nuevo registro, limpiando datos anteriores');
+          // Limpiar contexto para empezar fresco
+          await updateUser(this.user!.phone_number, {
+            conversation_context: {},
+          });
+          // Continuar con handleWorkoutInput pero con contexto limpio
+          return this.handleWorkoutInput(message, {});
+        }
       }
 
       // Comando cancelar - funciona en cualquier estado de registro de entrenamiento
