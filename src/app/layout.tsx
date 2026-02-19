@@ -18,6 +18,10 @@ const robotoMono = Roboto_Mono({
 export const metadata: Metadata = {
   title: 'MASETRACK',
   description: 'SISTEMA DE CONTROL DE ENTRENAMIENTO',
+  icons: {
+    icon: '/favicon.ico',
+    apple: '/apple-touch-icon.png',
+  },
 }
 
 export default function RootLayout({
