@@ -256,7 +256,7 @@ export class ConversationService {
       // Comando cancelar - funciona en cualquier estado de registro de entrenamiento
       // Verificar tanto intención detectada como comandos simples
       if (userIntent.intent === 'cancel' || this.isCommand(message, this.COMMANDS.CANCEL)) {
-        return this.handleCancelRegistration();
+        return this.handleCancelRegistration(context);
       }
 
       switch (state) {
@@ -273,6 +273,8 @@ export class ConversationService {
           return this.handleWaitingForRepsAndSets(message, context);
         case 'waiting_for_rir':
           return this.handleWaitingForRir(message, context);
+        case 'confirm_cancel':
+          return this.handleConfirmCancel(message, context);
         case 'waiting_for_comment':
           return this.handleWaitingForComment(message, context);
         case 'confirm_save':
@@ -284,7 +286,7 @@ export class ConversationService {
         case 'resolving_exercise_type':
           return this.handleResolvingExerciseType(message, context);
         default:
-          return this.handleUnknownState();
+          return this.handleUnknownState(context);
       }
     } catch (error) {
       console.error(`❌ Error en processMessage para ${phoneNumber}:`, error);
@@ -708,8 +710,17 @@ export class ConversationService {
       conversation_context: newContext,
     });
 
-    if (parseResult.clarification_needed === 'explain_rir') {
-      return `💡 *RIR = Repeticiones en Reserva*
+    const missingFields = parseResult.missing_fields;
+
+    // Si solo falta RIR, cambiar estado a waiting_for_rir para mejor flujo
+    if (missingFields.length === 1 && missingFields[0] === 'rir') {
+      await updateUser(this.user!.phone_number, {
+        conversation_state: 'waiting_for_rir',
+        conversation_context: newContext,
+      });
+
+      if (parseResult.clarification_needed === 'explain_rir') {
+        return `💡 *RIR = Repeticiones en Reserva*
 
 Es cuántas repeticiones más podrías haber hecho antes de parar:
 • 0 = Llegaste al fallo (no podías más)
@@ -717,10 +728,19 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
 • 2-5 = Podías hacer esa cantidad de reps más
 
 ¿Cuántas reps te faltaban? (0-5) 💪`;
+      }
+
+      return `💪 ¡Perfecto! Ya tengo: ${updatedWorkout.reps} reps, ${updatedWorkout.sets} series, ${updatedWorkout.weight_kg}kg
+
+Ahora necesito el RIR (0-5):
+• 0 = Al fallo
+• 1 = Una rep más
+• 2-5 = Esa cantidad más
+
+Ejemplo: "RIR 2" o "0"`;
     }
 
-    const missingFields = parseResult.missing_fields;
-
+    // Si faltan múltiples campos, mantener en waiting_for_reps_and_sets
     if (!parseResult.is_complete) {
       const missingText = missingFields.join(', ');
       const exampleParts: string[] = [];
@@ -750,21 +770,29 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
   private async handleWaitingForRir(message: string, context: Record<string, any>): Promise<string> {
     const workout = context.pending_workout as ParsedWorkout;
 
-    const parseResult = await parseFollowUpResponse(message, workout);
+    // Primero intentar parsear manualmente números simples (0-5) como RIR
+    const simpleRirMatch = message.trim().match(/^(\d)$/);
+    let updatedWorkout = workout;
+    let rirDetected = false;
 
-    // Guardar los datos extraídos SIEMPRE, incluso si se necesita explicar el RIR
-    const updatedWorkout = parseResult.merged;
-    const newContext = {
-      ...context,
-      pending_workout: updatedWorkout,
-    };
+    if (simpleRirMatch) {
+      const rirValue = parseInt(simpleRirMatch[1]);
+      if (rirValue >= 0 && rirValue <= 5) {
+        updatedWorkout = {
+          ...workout,
+          rir: rirValue,
+        };
+        rirDetected = true;
+      }
+    }
 
-    await updateUser(this.user!.phone_number, {
-      conversation_context: newContext,
-    });
+    // Si no detectamos número simple, usar Claude
+    if (!rirDetected) {
+      const parseResult = await parseFollowUpResponse(message, workout);
+      updatedWorkout = parseResult.merged;
 
-    if (parseResult.clarification_needed === 'explain_rir') {
-      return `💡 *RIR = Repeticiones en Reserva*
+      if (parseResult.clarification_needed === 'explain_rir') {
+        return `💡 *RIR = Repeticiones en Reserva*
 
 Es cuántas repeticiones más podrías haber hecho antes de parar:
 • 0 = Llegaste al fallo (no podías más)
@@ -772,13 +800,40 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
 • 2-5 = Podías hacer esa cantidad de reps más
 
 ¿Cuántas reps te faltaban? (0-5) 💪`;
+      }
+
+      // Verificar si Claude detectó RIR
+      if (parseResult.is_complete || updatedWorkout.rir !== null) {
+        const exerciseType = updatedWorkout.exercise_type || 'strength_weighted';
+        const exerciseName = updatedWorkout.exercise_name || 'Ejercicio';
+        const isCustom = updatedWorkout.is_custom ?? false;
+        const displayText = this.formatWorkoutDisplay(updatedWorkout, exerciseType, exerciseName, isCustom);
+
+        const newContext = {
+          ...context,
+          pending_workout: updatedWorkout,
+        };
+
+        await updateUser(this.user!.phone_number, {
+          conversation_state: 'waiting_for_comment',
+          conversation_context: newContext,
+        });
+
+        return `${displayText}\n\n¿Comentario? Responde 'no' para saltar.`;
+      }
     }
 
-    if (parseResult.is_complete) {
+    // Si detectamos RIR válido
+    if (rirDetected) {
       const exerciseType = updatedWorkout.exercise_type || 'strength_weighted';
       const exerciseName = updatedWorkout.exercise_name || 'Ejercicio';
       const isCustom = updatedWorkout.is_custom ?? false;
       const displayText = this.formatWorkoutDisplay(updatedWorkout, exerciseType, exerciseName, isCustom);
+
+      const newContext = {
+        ...context,
+        pending_workout: updatedWorkout,
+      };
 
       await updateUser(this.user!.phone_number, {
         conversation_state: 'waiting_for_comment',
@@ -809,17 +864,84 @@ Ejemplos:
 
   private async handleWaitingForComment(message: string, context: Record<string, any>): Promise<string> {
     console.log(`💬 handleWaitingForComment - Mensaje: "${message}"`);
-    
+
     const workout = context.pending_workout as any;
-    
+
     if (!workout) {
       console.error('❌ No hay workout pendiente en el contexto');
       return 'Hubo un problema. Volvamos a empezar. Describe tu entrenamiento.';
     }
 
+    const msgLower = message.toLowerCase().trim();
+
+    // Detectar intención de editar datos
+    const editPatterns = [
+      { pattern: /cambiar|editar|modificar|corregir.*peso/i, field: 'weight', message: '¿Cuántos kg quieres usar?' },
+      { pattern: /cambiar|editar|modificar|corregir.*rep/i, field: 'reps', message: '¿Cuántas repeticiones?' },
+      { pattern: /cambiar|editar|modificar|corregir.*seri|set/i, field: 'sets', message: '¿Cuántas series?' },
+      { pattern: /cambiar|editar|modificar|corregir.*rir/i, field: 'rir', message: '¿Qué RIR? (0-5)' },
+    ];
+
+    for (const editPattern of editPatterns) {
+      if (editPattern.pattern.test(msgLower)) {
+        // Guardar estado anterior para poder volver
+        const newContext = {
+          ...context,
+          previous_state: 'waiting_for_comment',
+          editing_field: editPattern.field,
+        };
+
+        let nextState: import('@/types').ConversationState;
+        switch (editPattern.field) {
+          case 'weight':
+            nextState = 'waiting_for_weight';
+            break;
+          case 'rir':
+            nextState = 'waiting_for_rir';
+            break;
+          case 'reps':
+          case 'sets':
+          default:
+            nextState = 'waiting_for_reps_and_sets';
+        }
+
+        await updateUser(this.user!.phone_number, {
+          conversation_state: nextState,
+          conversation_context: newContext,
+        });
+
+        return `✏️ ${editPattern.message}\n\n` +
+               `Dime el nuevo valor y actualizaré los datos.`;
+      }
+    }
+
     const notes = /^no$/i.test(message) ? null : message;
-    
+
     try {
+      // Validar datos antes de guardar
+      const validation = this.validateWorkoutData(workout);
+
+      if (!validation.valid) {
+        console.log('⚠️ Datos inválidos detectados:', validation.errors);
+
+        // Intentar recuperación inteligente
+        const recovery = await this.attemptSmartRecovery(workout, context);
+
+        if (recovery.success && recovery.newState) {
+          await updateUser(this.user!.phone_number, {
+            conversation_state: recovery.newState as import('@/types').ConversationState,
+          });
+          return recovery.message;
+        }
+
+        // No se pudo recuperar automáticamente, pedir corrección
+        const errorsText = validation.errors.join('\n• ');
+        return `⚠️ Encontré problemas en los datos:\n• ${errorsText}\n\n` +
+               `¿Quieres corregirlos? Escribe:\n` +
+               `• "cambiar peso", "cambiar reps", "cambiar series" o "cambiar rir"\n` +
+               `• O escribe "cancelar" para descartar y empezar de nuevo`;
+      }
+
       await this.saveWorkout(workout, notes);
 
       await updateUser(this.user!.phone_number, {
@@ -831,7 +953,24 @@ Ejemplos:
       return confirmationMessage;
     } catch (error) {
       console.error('❌ Error saving workout:', error);
-      return '❌ Error al guardar el entrenamiento. Por favor, intenta de nuevo.';
+
+      // Diferenciar tipos de errores
+      if (error instanceof Error) {
+        if (error.message.includes('network') || error.message.includes('timeout')) {
+          return '⚠️ Error de conexión con la base de datos.\n\n' +
+                 'Reintentando automáticamente...\n' +
+                 'Si persiste, espera unos segundos e intenta de nuevo.';
+        }
+        if (error.message.includes('constraint') || error.message.includes('duplicate')) {
+          return '⚠️ Error: Datos duplicados o restricción violada.\n\n' +
+                 'Parece que este ejercicio ya fue registrado.\n' +
+                 'Escribe "nuevo" para registrar otro ejercicio.';
+        }
+      }
+
+      return '❌ Error al guardar el entrenamiento.\n\n' +
+             'Detalles técnicos: ' + (error instanceof Error ? error.message : 'Error desconocido') + '\n' +
+             'Por favor, intenta de nuevo o escribe "ayuda" para soporte.';
     }
   }
 
@@ -1035,12 +1174,49 @@ Ejemplos:
     }
   }
 
-  private async handleUnknownState(): Promise<string> {
+  private async handleUnknownState(context: Record<string, any> = {}): Promise<string> {
+    console.error('⚠️ Estado desconocido detectado. Intentando recuperación...');
+
+    // Si hay datos pendientes, intentar recuperar
+    if (context.pending_workout?.exercise_name) {
+      const workout = context.pending_workout;
+      console.log('🔄 Recuperando workout:', workout.exercise_name);
+
+      // Determinar qué datos faltan y volver al estado apropiado
+      let recoveryState: import('@/types').ConversationState = 'registration_complete';
+      let recoveryMessage = '';
+
+      if (!workout.weight_kg && workout.exercise_type === 'strength_weighted') {
+        recoveryState = 'waiting_for_weight';
+        recoveryMessage = `⚠️ Detecté un problema técnico, pero puedo continuar con: ${workout.exercise_name}\n\n¿Cuántos kg usaste?`;
+      } else if (!workout.reps || !workout.sets) {
+        recoveryState = 'waiting_for_reps_and_sets';
+        recoveryMessage = `⚠️ Detecté un problema técnico, pero puedo continuar con: ${workout.exercise_name}\n\nFaltan reps o series. ¿Cuántas hiciste?`;
+      } else if (!workout.rir) {
+        recoveryState = 'waiting_for_rir';
+        recoveryMessage = `⚠️ Detecté un problema técnico, pero puedo continuar con: ${workout.exercise_name}\n\nSolo falta el RIR (0-5). ¿Cuál fue?`;
+      } else {
+        recoveryState = 'waiting_for_comment';
+        recoveryMessage = `⚠️ Detecté un problema técnico, pero tengo todos los datos de: ${workout.exercise_name}\n\n¿Comentario antes de guardar?`;
+      }
+
+      await updateUser(this.user!.phone_number, {
+        conversation_state: recoveryState,
+        conversation_context: context,
+      });
+
+      return recoveryMessage;
+    }
+
+    // No hay datos para recuperar, reiniciar limpio
     await updateUser(this.user!.phone_number, {
       conversation_state: 'registration_complete',
       conversation_context: {},
     });
-    return 'Hubo un problema. Volvamos a empezar. Describe tu entrenamiento.';
+
+    return '⚠️ Hubo un problema técnico.\n\n' +
+           'No se encontraron datos para recuperar.\n' +
+           'Volvamos a empezar. Describe tu entrenamiento.';
   }
 
   private async handlePendingVerification(): Promise<string> {
@@ -1052,7 +1228,20 @@ Ejemplos:
            '¿No recibiste el SMS? Verifica tu número en la web.';
   }
 
-  private async handleCancelRegistration(): Promise<string> {
+  private async handleCancelRegistration(context: Record<string, any> = {}): Promise<string> {
+    // Si hay un workout pendiente, pedir confirmación
+    if (context.pending_workout?.exercise_name) {
+      await updateUser(this.user!.phone_number, {
+        conversation_state: 'confirm_cancel',
+        conversation_context: context, // Mantener datos por si acaso
+      });
+      return '⚠️ ¿Estás seguro de cancelar?\n\n' +
+             `Se perderán los datos de: ${context.pending_workout.exercise_name}\n\n` +
+             'Responde "sí" para confirmar el cancelamiento\n' +
+             'Responde "no" para continuar con el registro';
+    }
+
+    // No hay datos pendientes, cancelar directamente
     await updateUser(this.user!.phone_number, {
       conversation_state: 'registration_complete',
       conversation_context: {},
@@ -1060,5 +1249,192 @@ Ejemplos:
     return '❌ Registro cancelado.\n\n' +
            'Puedes empezar de nuevo con otro ejercicio.\n' +
            'Escribe el nombre del ejercicio seguido de los datos.';
+  }
+
+  private async handleConfirmCancel(message: string, context: Record<string, any>): Promise<string> {
+    const msgLower = message.toLowerCase().trim();
+
+    if (msgLower === 'sí' || msgLower === 'si' || msgLower === 's' || msgLower === 'yes') {
+      // Confirmado: cancelar y limpiar
+      await updateUser(this.user!.phone_number, {
+        conversation_state: 'registration_complete',
+        conversation_context: {},
+      });
+      return '❌ Registro cancelado.\n\n' +
+             'Puedes empezar de nuevo con otro ejercicio.';
+    }
+
+    // No confirmado: volver al estado anterior
+    const previousState = context.previous_state || 'registration_complete';
+    await updateUser(this.user!.phone_number, {
+      conversation_state: previousState,
+      conversation_context: context,
+    });
+
+    return '✅ Continuamos con el registro.\n\n' +
+           'Describe los datos que faltan o escribe "ayuda" si necesitas orientación.';
+  }
+
+  // Función de validación robusta con recuperación inteligente
+  private validateWorkoutData(workout: ParsedWorkout): { valid: boolean; errors: string[]; suggestedFix?: string } {
+    const errors: string[] = [];
+
+    if (!workout.exercise_name) {
+      errors.push('Falta el nombre del ejercicio');
+    }
+
+    // Validar por tipo de ejercicio
+    switch (workout.exercise_type) {
+      case 'strength_weighted':
+        if (!workout.weight_kg || (Array.isArray(workout.weight_kg) && workout.weight_kg.some(w => w <= 0))) {
+          errors.push('Peso inválido (debe ser mayor a 0)');
+        }
+        if (typeof workout.weight_kg === 'number' && workout.weight_kg > 500) {
+          errors.push('Peso muy alto (máximo 500kg)');
+        }
+        // falls through
+
+      case 'strength_bodyweight':
+        if (!workout.reps || (Array.isArray(workout.reps) && workout.reps.some(r => r <= 0))) {
+          errors.push('Repeticiones inválidas (debe ser mayor a 0)');
+        }
+        if (typeof workout.reps === 'number' && workout.reps > 100) {
+          errors.push('Repeticiones muy altas (máximo 100)');
+        }
+
+        if (!workout.sets || workout.sets <= 0) {
+          errors.push('Series inválidas (debe ser mayor a 0)');
+        }
+        if (workout.sets && workout.sets > 20) {
+          errors.push('Demasiadas series (máximo 20)');
+        }
+
+        // Validar RIR
+        if (workout.rir !== null && workout.rir !== undefined) {
+          const rirValues = Array.isArray(workout.rir) ? workout.rir : [workout.rir];
+          if (rirValues.some(r => r < 0 || r > 5)) {
+            errors.push('RIR debe estar entre 0 y 5');
+          }
+        }
+
+        // Validar que arrays tengan longitud consistente
+        const sets = workout.sets || 1;
+        if (Array.isArray(workout.weight_kg) && workout.weight_kg.length > sets) {
+          errors.push(`Más pesos (${workout.weight_kg.length}) que series (${sets})`);
+        }
+        if (Array.isArray(workout.reps) && workout.reps.length > sets) {
+          errors.push(`Más repeticiones (${workout.reps.length}) que series (${sets})`);
+        }
+        if (Array.isArray(workout.rir) && workout.rir.length > sets) {
+          errors.push(`Más valores RIR (${workout.rir.length}) que series (${sets})`);
+        }
+        break;
+
+      case 'isometric_time':
+      case 'cardio_time':
+        if (!workout.duration_seconds || workout.duration_seconds <= 0) {
+          errors.push('Duración inválida (debe ser mayor a 0 segundos)');
+        }
+        if (workout.duration_seconds && workout.duration_seconds > 86400) {
+          errors.push('Duración muy larga (máximo 24 horas)');
+        }
+        break;
+
+      case 'cardio_distance':
+        if (!workout.distance_km || workout.distance_km <= 0) {
+          errors.push('Distancia inválida (debe ser mayor a 0)');
+        }
+        if (workout.distance_km && workout.distance_km > 1000) {
+          errors.push('Distancia muy larga (máximo 1000km)');
+        }
+        break;
+
+      case 'cardio_both':
+        if (!workout.duration_seconds || workout.duration_seconds <= 0) {
+          errors.push('Duración inválida (debe ser mayor a 0 segundos)');
+        }
+        if (!workout.distance_km || workout.distance_km <= 0) {
+          errors.push('Distancia inválida (debe ser mayor a 0)');
+        }
+        break;
+    }
+
+    // Generar sugerencia de corrección
+    let suggestedFix: string | undefined;
+    if (errors.length > 0) {
+      suggestedFix = 'Revisa los siguientes datos: ' + errors.join(', ');
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      suggestedFix
+    };
+  }
+
+  // Función para intentar corregir datos automáticamente
+  private async attemptSmartRecovery(workout: ParsedWorkout, context: Record<string, any>): Promise<{ success: boolean; message: string; newState?: string }> {
+    console.log('🧠 Intentando recuperación inteligente...');
+
+    // Caso 1: RIR fuera de rango
+    if (workout.rir !== null && workout.rir !== undefined) {
+      const rirValues = Array.isArray(workout.rir) ? workout.rir : [workout.rir];
+      const invalidRir = rirValues.findIndex(r => r < 0 || r > 5);
+
+      if (invalidRir !== -1) {
+        // Corregir a valor dentro de rango
+        const correctedRir = rirValues.map(r => Math.max(0, Math.min(5, r)));
+        const newWorkout = {
+          ...workout,
+          rir: Array.isArray(workout.rir) ? correctedRir : correctedRir[0]
+        };
+
+        await updateUser(this.user!.phone_number, {
+          conversation_context: { ...context, pending_workout: newWorkout }
+        });
+
+        return {
+          success: true,
+          message: `✅ Corregí automáticamente el RIR (debe ser 0-5). Continuamos...`,
+          newState: 'waiting_for_comment'
+        };
+      }
+    }
+
+    // Caso 2: Arrays más largos que sets - truncar
+    if (workout.sets) {
+      let modified = false;
+      const newWorkout = { ...workout };
+
+      if (Array.isArray(workout.weight_kg) && workout.weight_kg.length > workout.sets) {
+        newWorkout.weight_kg = workout.weight_kg.slice(0, workout.sets);
+        modified = true;
+      }
+      if (Array.isArray(workout.reps) && workout.reps.length > workout.sets) {
+        newWorkout.reps = workout.reps.slice(0, workout.sets);
+        modified = true;
+      }
+      if (Array.isArray(workout.rir) && workout.rir.length > workout.sets) {
+        newWorkout.rir = workout.rir.slice(0, workout.sets);
+        modified = true;
+      }
+
+      if (modified) {
+        await updateUser(this.user!.phone_number, {
+          conversation_context: { ...context, pending_workout: newWorkout }
+        });
+
+        return {
+          success: true,
+          message: `✅ Corregí automáticamente los datos (eliminé valores extra). Continuamos...`,
+          newState: 'waiting_for_comment'
+        };
+      }
+    }
+
+    return {
+      success: false,
+      message: 'No pude corregir automáticamente los datos. Por favor revisa la información.'
+    };
   }
 }

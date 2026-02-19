@@ -1,15 +1,18 @@
 export type ConversationState =
+  | 'pending_verification'
   | 'new_user'
   | 'registration_complete'
   | 'parsing_workout'
   | 'waiting_for_weight'
+  | 'waiting_for_reps_and_sets'
   | 'waiting_for_rir'
   | 'waiting_for_comment'
   | 'confirm_save'
   | 'session_closed'
   | 'creating_custom_exercise_name'
   | 'creating_custom_exercise_muscle'
-  | 'resolving_exercise_type';  // Nuevo estado para ejercicios ambiguos
+  | 'resolving_exercise_type'  // Nuevo estado para ejercicios ambiguos
+  | 'confirm_cancel';  // Estado para confirmar cancelación
 
 export type ExerciseType = 
   | 'strength_weighted'      // Con peso (barra, mancuerna)

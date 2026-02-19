@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyCode } from '@/lib/auth/codes'
-import { getUserByPhone } from '@/lib/supabase/client'
+import { getUserByPhone, updateUser } from '@/lib/supabase/client'
 import { sendWhatsAppMessage } from '@/lib/services/twilio.service'
 
 // Números de admin (puedes configurar los tuyos)
@@ -39,6 +39,12 @@ export async function POST(request: NextRequest) {
 
     // Verificar si es admin
     const isAdmin = ADMIN_NUMBERS.includes(phone)
+
+    // Actualizar estado del usuario a verificado
+    await updateUser(phone, {
+      conversation_state: 'registration_complete',
+      conversation_context: {},
+    })
 
     // Intentar enviar mensaje de bienvenida por WhatsApp (SOLO para usuarios nuevos)
     let whatsappJoined = true
