@@ -375,8 +375,8 @@ export class ConversationService {
   }
 
   private async askForExerciseType(exercise: ExerciseDataExtended, parsed: ParsedWorkout, context: Record<string, any>): Promise<string> {
+    // Crear contexto LIMPIO para resolver el tipo de ejercicio
     const newContext = {
-      ...context,
       pending_workout: parsed,
       pending_exercise: exercise,
     };
@@ -441,8 +441,8 @@ export class ConversationService {
     // Validate based on exercise type
     const validation = this.validateExerciseData(parsed, exerciseType);
     if (!validation.valid) {
+      // Crear contexto LIMPIO para el nuevo ejercicio
       const newContext = {
-        ...context,
         pending_workout: {
           ...parsed,
           exercise_name: exerciseName,
@@ -502,8 +502,8 @@ export class ConversationService {
       return validation.message;
     }
 
+    // Crear contexto LIMPIO para el nuevo ejercicio (sin datos del ejercicio anterior)
     const newContext = {
-      ...context,
       pending_workout: { 
         ...parsed, 
         exercise_name: exerciseName,
