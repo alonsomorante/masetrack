@@ -44,7 +44,7 @@ export default function Sidebar({ userName }: SidebarProps) {
             <Activity className="w-5 h-5 text-[var(--bg-primary)]" />
           </div>
           <div>
-            <span className="font-display text-sm font-bold text-[var(--text-primary)] tracking-wider">FITTRACK</span>
+            <span className="font-display text-sm font-bold text-[var(--text-primary)] tracking-wider">MASETRACK</span>
             <span className="font-mono text-[10px] text-[var(--accent)] block">v2.1.4</span>
           </div>
         </div>
@@ -82,7 +82,7 @@ export default function Sidebar({ userName }: SidebarProps) {
                   <Activity className="w-6 h-6 text-[var(--bg-primary)]" />
                 </div>
                 <div>
-                  <h1 className="font-display text-lg font-bold text-[var(--text-primary)] tracking-wider">FITTRACK PRO</h1>
+                  <h1 className="font-display text-lg font-bold text-[var(--text-primary)] tracking-wider">MASETRACK</h1>
                   <p className="font-mono text-[10px] text-[var(--accent)] uppercase">SISTEMA DE CONTROL</p>
                 </div>
               </div>
