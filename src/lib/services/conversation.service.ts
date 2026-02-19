@@ -679,6 +679,17 @@ export class ConversationService {
 
     const parseResult = await parseFollowUpResponse(message, workout);
 
+    // Guardar los datos extraídos SIEMPRE, incluso si se necesita explicar el RIR
+    const updatedWorkout = parseResult.merged;
+    const newContext = {
+      ...context,
+      pending_workout: updatedWorkout,
+    };
+
+    await updateUser(this.user!.phone_number, {
+      conversation_context: newContext,
+    });
+
     if (parseResult.clarification_needed === 'explain_rir') {
       return `💡 *RIR = Repeticiones en Reserva*
 
@@ -690,7 +701,6 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
 ¿Cuántas reps te faltaban? (0-5) 💪`;
     }
 
-    const updatedWorkout = parseResult.merged;
     const missingFields = parseResult.missing_fields;
 
     if (!parseResult.is_complete) {
@@ -701,24 +711,10 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
       if (missingFields.includes('rir')) exampleParts.push('RIR 2');
       const exampleText = exampleParts.join(' ');
 
-      const newContext = {
-        ...context,
-        pending_workout: updatedWorkout,
-      };
-
-      await updateUser(this.user!.phone_number, {
-        conversation_context: newContext,
-      });
-
       return `⚠️ Aún falta: ${missingText}\n\n` +
              `Ejemplo: "${exampleText}"\n` +
              `O escribe todos los datos juntos.`;
     }
-
-    const newContext = {
-      ...context,
-      pending_workout: updatedWorkout,
-    };
 
     const exerciseType = updatedWorkout.exercise_type || 'strength_weighted';
     const exerciseName = updatedWorkout.exercise_name || 'Ejercicio';
@@ -738,6 +734,17 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
 
     const parseResult = await parseFollowUpResponse(message, workout);
 
+    // Guardar los datos extraídos SIEMPRE, incluso si se necesita explicar el RIR
+    const updatedWorkout = parseResult.merged;
+    const newContext = {
+      ...context,
+      pending_workout: updatedWorkout,
+    };
+
+    await updateUser(this.user!.phone_number, {
+      conversation_context: newContext,
+    });
+
     if (parseResult.clarification_needed === 'explain_rir') {
       return `💡 *RIR = Repeticiones en Reserva*
 
@@ -749,14 +756,7 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
 ¿Cuántas reps te faltaban? (0-5) 💪`;
     }
 
-    const updatedWorkout = parseResult.merged;
-
     if (parseResult.is_complete) {
-      const newContext = {
-        ...context,
-        pending_workout: updatedWorkout,
-      };
-
       const exerciseType = updatedWorkout.exercise_type || 'strength_weighted';
       const exerciseName = updatedWorkout.exercise_name || 'Ejercicio';
       const isCustom = updatedWorkout.is_custom ?? false;
@@ -769,15 +769,6 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
 
       return `${displayText}\n\n¿Comentario? Responde 'no' para saltar.`;
     }
-
-    const newContext = {
-      ...context,
-      pending_workout: updatedWorkout,
-    };
-
-    await updateUser(this.user!.phone_number, {
-      conversation_context: newContext,
-    });
 
     const msgLower = message.toLowerCase().trim();
     if (/más\s+o\s+menos|aprox|no\s+estoy\s+seguro|quiz[áa]s|tal\s+vez/.test(msgLower)) {
