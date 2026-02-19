@@ -588,3 +588,98 @@ function getMissingFields(workout: ParsedWorkout): string[] {
 
   return fields;
 }
+
+export interface UserIntent {
+  intent: 'create_workout' | 'cancel' | 'help' | 'exercises_list' | 'web_dashboard' | 'continue_workout' | 'unknown';
+  confidence: number;
+  suggested_action?: string;
+}
+
+export async function detectUserIntent(
+  message: string,
+  currentState: string,
+  hasPendingWorkout: boolean
+): Promise<UserIntent> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY is missing.');
+  }
+
+  const anthropic = new Anthropic({ apiKey });
+
+  const systemPrompt = `You are an intent detection system for a workout tracking WhatsApp bot.
+
+## Current Context
+- Current conversation state: ${currentState}
+- Has pending workout: ${hasPendingWorkout}
+
+## Possible Intents
+
+1. **create_workout** - User wants to start/register a new workout/exercise
+   - Examples: "quiero registrar un ejercicio", "agregar entrenamiento", "nuevo ejercicio", "añadir press banca", "voy a hacer sentadillas"
+   - Even if they say "ejercicio nuevo" or "nuevo ejercicio" - they want to CREATE, not cancel
+
+2. **cancel** - User wants to cancel/stop current operation
+   - Examples: "cancelar", "parar", "detener", "no quiero continuar", "borra esto", "empezar de nuevo", "olvidalo"
+   - ONLY if they clearly want to abort current operation
+
+3. **help** - User needs help/instructions
+   - Examples: "ayuda", "no sé cómo", "cómo funciona", "no entiendo", "instrucciones", "help"
+
+4. **exercises_list** - User wants to see available exercises
+   - Examples: "lista de ejercicios", "qué ejercicios hay", "catálogo", "mostrar ejercicios"
+
+5. **web_dashboard** - User wants the web dashboard link
+   - Examples: "web", "dashboard", "link", "quiero ver mi progreso", "página web"
+
+6. **continue_workout** - User is providing data to continue current workout registration
+   - Examples: specific numbers like "80kg", "10 reps", "3 series", "RIR 2"
+   - Use this when they're in the middle of a workout registration flow
+
+7. **unknown** - Cannot determine intent clearly
+
+## IMPORTANT RULES
+
+- If user says "ejercicio nuevo", "nuevo ejercicio", "registrar nuevo" → intent: "create_workout" (NOT cancel)
+- If user says "quiero parar", "detener", "cancelar esto" → intent: "cancel"
+- Be generous interpreting workout creation intent - if they mention any exercise or wanting to add/register, it's create_workout
+- If they have a pending workout and provide numbers/data, it's likely "continue_workout"
+
+## OUTPUT
+Return ONLY valid JSON:
+{
+  "intent": "create_workout" | "cancel" | "help" | "exercises_list" | "web_dashboard" | "continue_workout" | "unknown",
+  "confidence": 0.0 to 1.0,
+  "suggested_action": "brief description of what to do"
+}`;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-3-haiku-20240307',
+      max_tokens: 300,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: message }],
+    });
+
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    console.log('🤖 Claude intent detection raw response:', text);
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      console.log('📊 Intent detected:', parsed);
+
+      return {
+        intent: parsed.intent || 'unknown',
+        confidence: parsed.confidence || 0.5,
+        suggested_action: parsed.suggested_action || '',
+      };
+    }
+
+    return { intent: 'unknown', confidence: 0, suggested_action: '' };
+  } catch (error) {
+    console.error('Error detecting intent:', error);
+    return { intent: 'unknown', confidence: 0, suggested_action: '' };
+  }
+}

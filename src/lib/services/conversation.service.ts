@@ -8,18 +8,18 @@ import {
   createCustomExercise,
   getCustomExerciseByName,
 } from '@/lib/supabase/client';
-import { parseWorkoutMessage, parseFollowUpResponse } from '@/lib/services/claude.service';
+import { parseWorkoutMessage, parseFollowUpResponse, detectUserIntent } from '@/lib/services/claude.service';
 import { findExerciseByName, getExercisesListText, EXERCISES_DATA, getExercisesByMuscleGroup, ExerciseDataExtended } from '@/lib/data/exercises.catalog';
 
 export class ConversationService {
   private user: User | null = null;
 
-  // Comandos disponibles
+  // Comandos disponibles (palabras exactas)
   private readonly COMMANDS = {
     HELP: ['hola', 'ayuda', 'help', 'menu', 'comandos', 'info'],
     EXERCISES: ['ejercicios', 'lista', 'catalogo', 'catálogo'],
     WEB: ['web', 'dashboard', 'link', 'enlace', 'url'],
-    CANCEL: ['cancelar', 'cancel', 'borrar', 'eliminar', 'borra', 'nuevo', 'otro'],
+    CANCEL: ['cancelar', 'cancel', 'borrar', 'eliminar', 'borra', 'parar', 'detener'],
   };
 
   // Helper function to format reps for display
@@ -221,23 +221,41 @@ export class ConversationService {
 
       console.log(`📊 Estado: ${state}, Contexto:`, JSON.stringify(context, null, 2));
 
-      // Verificar comandos primero (excepto si estamos en medio de un flujo)
+      // Detectar intención del usuario con Claude (solo cuando no hay un workout pendiente activo)
+      const hasPendingWorkout = !!context.pending_workout?.exercise_name;
+      let userIntent = { intent: 'unknown', confidence: 0 } as { intent: string; confidence: number };
+      
+      // Solo usar detección inteligente si no estamos en medio de recopilar datos específicos
+      if (!['waiting_for_weight', 'waiting_for_reps_and_sets', 'waiting_for_rir', 'waiting_for_comment'].includes(state)) {
+        userIntent = await detectUserIntent(message, state, hasPendingWorkout);
+        console.log(`🎯 Intención detectada: ${userIntent.intent} (confianza: ${userIntent.confidence})`);
+      }
+
+      // Procesar según intención detectada o comandos simples
       if (state === 'registration_complete' || state === 'session_closed') {
-        if (this.isCommand(message, this.COMMANDS.HELP)) {
+        // Priorizar intención detectada por Claude sobre comandos simples
+        if (userIntent.intent === 'help' || this.isCommand(message, this.COMMANDS.HELP)) {
           return this.getHelpMessage();
         }
         
-        if (this.isCommand(message, this.COMMANDS.EXERCISES)) {
+        if (userIntent.intent === 'exercises_list' || this.isCommand(message, this.COMMANDS.EXERCISES)) {
           return this.getExercisesMessage();
         }
         
-        if (this.isCommand(message, this.COMMANDS.WEB)) {
+        if (userIntent.intent === 'web_dashboard' || this.isCommand(message, this.COMMANDS.WEB)) {
           return this.getWebMessage();
+        }
+
+        // Si quiere crear un workout, dejar que handleWorkoutInput lo procese
+        if (userIntent.intent === 'create_workout') {
+          console.log('📝 Usuario quiere crear un nuevo ejercicio');
+          // Continuar al handleWorkoutInput normal
         }
       }
 
       // Comando cancelar - funciona en cualquier estado de registro de entrenamiento
-      if (this.isCommand(message, this.COMMANDS.CANCEL)) {
+      // Verificar tanto intención detectada como comandos simples
+      if (userIntent.intent === 'cancel' || this.isCommand(message, this.COMMANDS.CANCEL)) {
         return this.handleCancelRegistration();
       }
 
