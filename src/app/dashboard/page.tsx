@@ -47,6 +47,64 @@ interface Stats {
   muscleGroups: Record<string, number>
 }
 
+// Custom Tooltip for dark/light mode
+function CustomTooltip({ active, payload }: any) {
+  const [isDark, setIsDark] = useState(false)
+  
+  useEffect(() => {
+    const checkTheme = () => {
+      setIsDark(!document.documentElement.classList.contains('light'))
+    }
+    checkTheme()
+    const observer = new MutationObserver(checkTheme)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+  
+  if (active && payload && payload.length) {
+    return (
+      <div className={`px-3 py-2 rounded-lg shadow-lg text-sm ${
+        isDark 
+          ? 'bg-[#1A1A1A] border border-[#3D3D3D] text-[#F0F0F0]' 
+          : 'bg-white border border-gray-200 text-gray-900'
+      }`}>
+        <p className="font-semibold">{payload[0].name}</p>
+        <p className="text-xs opacity-80">{payload[0].value} sets</p>
+      </div>
+    )
+  }
+  return null
+}
+
+interface Workout {
+  id: number
+  weight_kg: number
+  reps: number
+  sets: number
+  rir: number | null
+  notes: string | null
+  created_at: string
+  exercise_id: number | null
+  custom_exercise_id: number | null
+  exercises: {
+    name: string
+    muscle_group: string
+  } | null
+  custom_exercises: {
+    name: string
+    muscle_group: string
+  } | null
+  is_custom?: boolean
+  exercise_name?: string
+  muscle_group?: string
+}
+
+interface Stats {
+  totalWorkouts: number
+  uniqueExercises: number
+  muscleGroups: Record<string, number>
+}
+
 // Chart colors that work in both modes
 const COLORS = ['#FFB800', '#00C853', '#FF1744', '#00B0FF', '#AA00FF', '#FF6D00', '#2979FF', '#76FF03', '#FF3D00']
 
@@ -211,12 +269,7 @@ export default function DashboardPage() {
                     ))}
                   </Pie>
                   <Tooltip 
-                    formatter={(value: any, name: any) => [`${value} sets`, name]}
-                    contentStyle={{
-                      backgroundColor: 'var(--bg-secondary)',
-                      border: '1px solid var(--border-color)',
-                      color: 'var(--text-primary)'
-                    }}
+                    content={<CustomTooltip />}
                   />
                 </PieChart>
               </ResponsiveContainer>

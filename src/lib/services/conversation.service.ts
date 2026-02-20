@@ -372,27 +372,79 @@ export class ConversationService {
     const customExercise = await getCustomExerciseByName(this.user!.phone_number, parsed.exercise_name);
 
     if (customExercise) {
-      // El ejercicio ya existe para este usuario
+      // El ejercicio ya existe para este usuario (incluye fuzzy match)
       return this.processExerciseByType(parsed, customExercise as any, context, true);
     }
 
-    // El ejercicio NO existe - crear automáticamente como personalizado sin preguntar
-    console.log(`🆕 Creando ejercicio automáticamente: ${parsed.exercise_name}`);
+    // El ejercicio NO existe - verificar si hay ejercicios similares para preguntar
+    const similarExercises = await this.findSimilarExercises(parsed.exercise_name);
+    
+    if (similarExercises.length > 0) {
+      // Hay ejercicios similares - preguntar al usuario
+      const newContext = {
+        pending_custom_exercise: {
+          name: parsed.exercise_name,
+          parsed: parsed,
+          similar_exercises: similarExercises,
+        },
+      };
 
-    // Crear ejercicio personalizado automáticamente
-    const newExercise = await createCustomExercise({
-      user_phone: this.user!.phone_number,
-      name: parsed.exercise_name,
-      muscle_group: 'otros', // Por defecto, usuario puede editar después
-    });
+      await updateUser(this.user!.phone_number, {
+        conversation_state: 'creating_custom_exercise_muscle',
+        conversation_context: newContext,
+      });
 
-    if (!newExercise) {
-      return `❌ Error al crear el ejercicio "${parsed.exercise_name}".\n\n` +
-             `Intenta de nuevo o usa otro nombre.`;
+      let message = `🤔 ¿Te refieres a alguno de estos ejercicios que ya tienes?\n\n`;
+      
+      similarExercises.forEach((ex: { name: string; muscle_group: string }, index: number) => {
+        message += `${index + 1}. ${ex.name} (${ex.muscle_group})\n`;
+      });
+      
+      message += `\n${similarExercises.length + 1}. *Crear nuevo:* "${parsed.exercise_name}"\n\n`;
+      message += `Responde con el número`;
+
+      return message;
     }
 
-    // Procesar el ejercicio recién creado
-    return this.processExerciseByType(parsed, newExercise, context, true);
+    // No hay ejercicios similares - preguntar por grupo muscular directamente
+    console.log(`🆕 Ejercicio nuevo: ${parsed.exercise_name}, preguntando grupo muscular`);
+
+    // Guardar los datos del ejercicio para crear después
+    const newContext = {
+      pending_custom_exercise: {
+        name: parsed.exercise_name,
+        parsed: parsed,
+      },
+    };
+
+    await updateUser(this.user!.phone_number, {
+      conversation_state: 'creating_custom_exercise_muscle',
+      conversation_context: newContext,
+    });
+
+    // Mostrar opciones de grupos musculares
+    const muscleGroupOptions = [
+      { num: 1, name: 'Pecho', emoji: '💪' },
+      { num: 2, name: 'Espalda', emoji: '🔙' },
+      { num: 3, name: 'Hombros', emoji: '🏋️' },
+      { num: 4, name: 'Bíceps', emoji: '💪' },
+      { num: 5, name: 'Tríceps', emoji: '💪' },
+      { num: 6, name: 'Piernas', emoji: '🦵' },
+      { num: 7, name: 'Core', emoji: '🎯' },
+      { num: 8, name: 'Cardio', emoji: '🏃' },
+      { num: 9, name: 'Otros', emoji: '📝' },
+    ];
+
+    let muscleMessage = `🆕 *Nuevo ejercicio:* "${parsed.exercise_name}"\n\n`;
+    muscleMessage += `¿A qué grupo muscular pertenece?\n\n`;
+    
+    muscleGroupOptions.forEach(opt => {
+      muscleMessage += `${opt.num}. ${opt.emoji} ${opt.name}\n`;
+    });
+
+    muscleMessage += `\nResponde con el número (1-9)`;
+
+    return muscleMessage;
   }
 
   private async askForExerciseType(exercise: ExerciseDataExtended, parsed: ParsedWorkout, context: Record<string, any>): Promise<string> {
@@ -1249,6 +1301,60 @@ Ejemplos:
     console.log(`✅ Workout guardado exitosamente`);
   }
 
+  private async findSimilarExercises(exerciseName: string): Promise<{ id: number; name: string; muscle_group: string }[]> {
+    const userExercises = await getUserCustomExercises(this.user!.phone_number);
+    
+    if (!userExercises || userExercises.length === 0) {
+      return [];
+    }
+
+    // Normalize the search term
+    const normalizeText = (text: string) => {
+      return text.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, '')
+        .trim();
+    };
+
+    const normalizedSearch = normalizeText(exerciseName);
+    const searchWords = normalizedSearch.split(' ').filter(w => w.length > 2);
+    
+    if (searchWords.length === 0) {
+      return [];
+    }
+
+    // Calculate word overlap score
+    const calculateWordOverlap = (searchWords: string[], exerciseWords: string[]) => {
+      let matches = 0;
+      for (const searchWord of searchWords) {
+        if (exerciseWords.some(exWord => exWord.includes(searchWord) || searchWord.includes(exWord))) {
+          matches++;
+        }
+      }
+      return matches;
+    };
+
+    const similar: { id: number; name: string; muscle_group: string; score: number }[] = [];
+
+    for (const exercise of userExercises) {
+      const normalizedExerciseName = normalizeText(exercise.name);
+      const exerciseWords = normalizedExerciseName.split(' ').filter(w => w.length > 2);
+      
+      const score = calculateWordOverlap(searchWords, exerciseWords) / Math.max(searchWords.length, 1);
+      
+      // Threshold de 0.4 para mostrar como similar
+      if (score >= 0.4) {
+        similar.push({ ...exercise, score });
+      }
+    }
+
+    // Ordenar por score y devolver los top 3
+    return similar
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map(({ score, ...rest }) => rest);
+  }
+
   private async getExerciseId(exerciseName: string): Promise<number | null> {
     const exercise = await getExerciseByName(exerciseName);
     return exercise?.id || null;
@@ -1295,15 +1401,82 @@ Ejemplos:
   }
 
   private async handleCreatingCustomExerciseMuscle(message: string, context: Record<string, any>): Promise<string> {
-    const muscleGroups = ['pecho', 'espalda', 'piernas', 'hombros', 'biceps', 'triceps', 'core', 'cardio', 'otros'];
-    const muscleGroup = message.toLowerCase().trim();
-
-    if (!muscleGroups.includes(muscleGroup)) {
-      return `❌ Grupo muscular no válido.\n\nElige uno de estos:\n${muscleGroups.join(', ')}`;
+    const customExerciseData = context.pending_custom_exercise;
+    const similarExercises = customExerciseData?.similar_exercises || [];
+    
+    // Check if user is selecting from similar exercises
+    const input = message.toLowerCase().trim();
+    const num = parseInt(input);
+    
+    if (similarExercises.length > 0 && !isNaN(num)) {
+      // User is selecting from similar exercises
+      if (num >= 1 && num <= similarExercises.length) {
+        // User selected an existing exercise
+        const selectedExercise = similarExercises[num - 1];
+        console.log(`✅ Usando ejercicio existente: ${selectedExercise.name}`);
+        
+        return this.processExerciseByType(customExerciseData.parsed, selectedExercise, {}, true);
+      } else if (num === similarExercises.length + 1) {
+        // User wants to create a new exercise - continue to muscle group selection
+        // Fall through to muscle group logic
+      } else {
+        return `❌ Número no válido. Elige 1-${similarExercises.length + 1}`;
+      }
     }
 
-    const customExerciseData = context.pending_custom_exercise;
-    
+    const muscleGroupMap: Record<number, string> = {
+      1: 'pecho',
+      2: 'espalda',
+      3: 'hombros',
+      4: 'biceps',
+      5: 'triceps',
+      6: 'piernas',
+      7: 'core',
+      8: 'cardio',
+      9: 'otros',
+    };
+
+    const muscleGroupNames: Record<string, string> = {
+      'pecho': 'pecho',
+      'pechos': 'pecho',
+      'espalda': 'espalda',
+      'hombros': 'hombros',
+      'hombro': 'hombros',
+      'biceps': 'biceps',
+      'bicep': 'biceps',
+      'triceps': 'triceps',
+      'tricep': 'triceps',
+      'piernas': 'piernas',
+      'pierna': 'piernas',
+      'core': 'core',
+      'cardio': 'cardio',
+      'otros': 'otros',
+      'otro': 'otros',
+    };
+
+    let muscleGroup: string | null = null;
+
+    // Check if input is a number
+    if (!isNaN(num) && num >= 1 && num <= 9) {
+      muscleGroup = muscleGroupMap[num];
+    } else if (muscleGroupNames[input]) {
+      muscleGroup = muscleGroupNames[input];
+    }
+
+    if (!muscleGroup) {
+      // If there were similar exercises, show them again
+      if (similarExercises.length > 0) {
+        let errorMsg = `❌ Grupo muscular no válido.\n\n`;
+        errorMsg += `¿Te refieres a alguno de estos?\n\n`;
+        similarExercises.forEach((ex: { name: string; muscle_group: string }, index: number) => {
+          errorMsg += `${index + 1}. ${ex.name} (${ex.muscle_group})\n`;
+        });
+        errorMsg += `\n${similarExercises.length + 1}. Crear nuevo: "${customExerciseData.name}"`;
+        return errorMsg;
+      }
+      return `❌ Grupo muscular no válido.\n\nElige con el número:\n1. Pecho\n2. Espalda\n3. Hombros\n4. Bíceps\n5. Tríceps\n6. Piernas\n7. Core\n8. Cardio\n9. Otros`;
+    }
+
     try {
       const newExercise = await createCustomExercise({
         user_phone: this.user!.phone_number,
@@ -1311,6 +1484,7 @@ Ejemplos:
         muscle_group: muscleGroup,
       });
 
+      // Mantener el workout data para continuar con el registro
       await updateUser(this.user!.phone_number, {
         conversation_state: 'registration_complete',
         conversation_context: {},
