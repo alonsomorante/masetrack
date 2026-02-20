@@ -808,13 +808,25 @@ export class ConversationService {
         weight_kg: null
       };
     } else if (isBodyweightExercise) {
-      // If original was bodyweight but user didn't say "sin peso" and didn't provide weight,
-      // keep as bodyweight (no weight_kg)
-      updatedWorkout = {
-        ...updatedWorkout,
-        exercise_type: 'strength_bodyweight',
-        weight_kg: null
-      };
+      // Check if user provided reps/sets/rir - if so, switch to weighted and ask for weight
+      // This fixes the DB constraint issue
+      const userProvidedReps = parseResult.extracted.reps !== null && parseResult.extracted.reps !== undefined;
+      const userProvidedSets = parseResult.extracted.sets !== null && parseResult.extracted.sets !== undefined;
+      
+      if (userProvidedReps || userProvidedSets) {
+        // User provided reps/sets but no weight - switch to weighted type
+        updatedWorkout = {
+          ...updatedWorkout,
+          exercise_type: 'strength_weighted',
+        };
+      } else {
+        // No reps/sets provided, keep as bodyweight (no weight)
+        updatedWorkout = {
+          ...updatedWorkout,
+          exercise_type: 'strength_bodyweight',
+          weight_kg: null
+        };
+      }
     }
 
     // Save extracted data ALWAYS
