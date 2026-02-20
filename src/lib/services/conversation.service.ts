@@ -461,8 +461,10 @@ export class ConversationService {
     
     // Validate based on exercise type
     const validation = this.validateExerciseData(parsed, exerciseType);
+    
+    // If validation fails, ask for ALL missing data at once
     if (!validation.valid) {
-      // Crear contexto LIMPIO para el nuevo ejercicio
+      // Create clean context
       const newContext = {
         pending_workout: {
           ...parsed,
@@ -473,57 +475,38 @@ export class ConversationService {
         },
       };
 
-      // Check if we have some data already
-      const hasWeight = parsed.weight_kg !== null && parsed.weight_kg !== undefined;
-      const hasReps = parsed.reps !== null && parsed.reps !== undefined;
-      const hasSets = parsed.sets !== null && parsed.sets !== undefined;
-      const hasRir = parsed.rir !== null && parsed.rir !== undefined;
-      
-      // Build dynamic message for missing fields
-      const missingFields: string[] = [];
-      if (!hasReps) missingFields.push('reps');
-      if (!hasSets) missingFields.push('series');
-      if (!hasRir) missingFields.push('RIR');
-      
-      const missingText = missingFields.join(', ');
+      // Build the message with ALL missing fields
+      const missingFields = validation.missingFields;
+      const displayText = this.formatWorkoutDisplay(
+        { ...parsed, exercise_name: exerciseName, exercise_type: exerciseType },
+        exerciseType, 
+        exerciseName, 
+        isCustom
+      );
+
+      // Build examples for missing fields
       const exampleParts: string[] = [];
-      if (!hasReps) exampleParts.push('10 reps');
-      if (!hasSets) exampleParts.push('3 series');
-      if (!hasRir) exampleParts.push('RIR 2');
+      if (missingFields.includes('peso')) exampleParts.push('80kg');
+      if (missingFields.includes('reps')) exampleParts.push('10 reps');
+      if (missingFields.includes('series')) exampleParts.push('3 series');
+      if (missingFields.includes('RIR')) exampleParts.push('RIR 2');
+      if (missingFields.includes('duración')) exampleParts.push('60 segundos');
+      if (missingFields.includes('distancia')) exampleParts.push('5 km');
+      
       const exampleText = exampleParts.join(' ');
+
+      // Ask for ALL missing fields at once
+      const missingText = missingFields.join(', ');
       
-      if (exerciseType === 'strength_weighted') {
-        if (!hasWeight) {
-          // First ask for weight
-          await updateUser(this.user!.phone_number, {
-            conversation_state: 'waiting_for_weight',
-            conversation_context: newContext,
-          });
-          return `${validation.message}\n\n¿Cuántos kg usaste?`;
-        } else {
-          // Have weight, ask for remaining fields
-          await updateUser(this.user!.phone_number, {
-            conversation_state: 'waiting_for_reps_and_sets',
-            conversation_context: newContext,
-          });
-          
-          const displayText = this.formatWorkoutDisplay(parsed, exerciseType, exerciseName, isCustom);
-          return `${displayText}\n\n💪 Necesito: ${missingText}\nEjemplo: "${exampleText}"`;
-        }
-      } else if (exerciseType === 'strength_bodyweight') {
-        await updateUser(this.user!.phone_number, {
-          conversation_state: 'waiting_for_reps_and_sets',
-          conversation_context: newContext,
-        });
-        
-        const displayText = this.formatWorkoutDisplay(parsed, exerciseType, exerciseName, isCustom);
-        return `${displayText}\n\n💪 Necesito: ${missingText}\nEjemplo: "${exampleText}"`;
-      }
-      
-      return validation.message;
+      await updateUser(this.user!.phone_number, {
+        conversation_state: 'waiting_for_reps_and_sets',
+        conversation_context: newContext,
+      });
+
+      return `${displayText}\n\n⚠️ Falta: ${missingText}\n\nEjemplo: "${exampleText}"\nO escribe todos los datos juntos.`;
     }
 
-    // Crear contexto LIMPIO para el nuevo ejercicio (sin datos del ejercicio anterior)
+    // Validation passed - save the workout directly
     const newContext = {
       pending_workout: { 
         ...parsed, 
@@ -535,18 +518,23 @@ export class ConversationService {
     };
 
     // Format display based on type
-    const displayText = this.formatWorkoutDisplay(parsed, exerciseType, exerciseName, isCustom);
+    const displayText = this.formatWorkoutDisplay(
+      { ...parsed, exercise_name: exerciseName, exercise_type: exerciseType },
+      exerciseType, 
+      exerciseName, 
+      isCustom
+    );
 
-    // Ask for RIR only for strength exercises
+    // Ask for RIR only for strength exercises if not provided
     if (exerciseType.includes('strength') && parsed.rir === null) {
       await updateUser(this.user!.phone_number, {
         conversation_state: 'waiting_for_rir',
         conversation_context: newContext,
       });
-      return `${displayText}\n\n¿RIR (0-5) o "no sé"?`;
+      return `${displayText}\n\n¿RIR (0-5)?`;
     }
 
-    // Guardar directamente sin pedir comentario
+    // Save directly without asking for comment
     const workoutToSave = newContext.pending_workout;
     await this.saveWorkout(workoutToSave, null);
     await updateUser(this.user!.phone_number, {
@@ -747,10 +735,39 @@ export class ConversationService {
       return 'Hubo un problema. Describe tu entrenamiento de nuevo.';
     }
 
+    const msgLower = message.toLowerCase().trim();
+
+    // Check if user says "sin peso" or similar - convert to bodyweight
+    const noWeightPatterns = [
+      'sin peso', 'sin kg', 'mi peso', 'mi propio peso', 
+      'peso corporal', 'solo reps', 'sin carga', 'sin mancuernas',
+      'solo', 'sin'
+    ];
+    
+    let convertToBodyweight = false;
+    for (const pattern of noWeightPatterns) {
+      if (msgLower.includes(pattern) && !msgLower.includes('con') && !msgLower.includes('kg')) {
+        convertToBodyweight = true;
+        break;
+      }
+    }
+
+    // Also check if the exercise type is bodyweight and no weight was provided
+    const isBodyweightExercise = workout.exercise_type === 'strength_bodyweight';
+
     const parseResult = await parseFollowUpResponse(message, workout);
 
-    // Guardar los datos extraídos SIEMPRE, incluso si se necesita explicar el RIR
-    const updatedWorkout = parseResult.merged;
+    // If user said "sin peso", convert to bodyweight and set weight to null
+    let updatedWorkout = parseResult.merged;
+    if (convertToBodyweight || isBodyweightExercise) {
+      updatedWorkout = {
+        ...updatedWorkout,
+        exercise_type: 'strength_bodyweight',
+        weight_kg: null
+      };
+    }
+
+    // Save extracted data ALWAYS
     const newContext = {
       ...context,
       pending_workout: updatedWorkout,
@@ -760,9 +777,12 @@ export class ConversationService {
       conversation_context: newContext,
     });
 
-    const missingFields = parseResult.missing_fields;
+    // Get missing fields from the updated workout
+    const exerciseType = updatedWorkout.exercise_type || 'strength_weighted';
+    const validation = this.validateExerciseData(updatedWorkout, exerciseType);
+    const missingFields = validation.missingFields;
 
-    // Si solo falta RIR, cambiar estado a waiting_for_rir para mejor flujo
+    // If only RIR is missing, change state to waiting_for_rir
     if (missingFields.length === 1 && missingFields[0] === 'rir') {
       await updateUser(this.user!.phone_number, {
         conversation_state: 'waiting_for_rir',
@@ -780,7 +800,7 @@ Es cuántas repeticiones más podrías haber hecho antes de parar:
 ¿Cuántas reps te faltaban? (0-5) 💪`;
       }
 
-      return `💪 ¡Perfecto! Ya tengo: ${updatedWorkout.reps} reps, ${updatedWorkout.sets} series, ${updatedWorkout.weight_kg}kg
+      return `💪 ¡Perfecto! Ya tengo: ${updatedWorkout.reps} reps, ${updatedWorkout.sets} series
 
 Ahora necesito el RIR (0-5):
 • 0 = Al fallo
@@ -790,25 +810,35 @@ Ahora necesito el RIR (0-5):
 Ejemplo: "RIR 2" o "0"`;
     }
 
-    // Si faltan múltiples campos, mantener en waiting_for_reps_and_sets
-    if (!parseResult.is_complete) {
+    // If multiple fields are missing, keep asking
+    if (!validation.valid || missingFields.length > 0) {
       const missingText = missingFields.join(', ');
+      
+      const displayText = this.formatWorkoutDisplay(
+        { ...updatedWorkout, exercise_name: updatedWorkout.exercise_name || 'Ejercicio' },
+        exerciseType,
+        updatedWorkout.exercise_name || 'Ejercicio',
+        updatedWorkout.is_custom ?? false
+      );
+
+      // Build examples for missing fields
       const exampleParts: string[] = [];
+      if (missingFields.includes('peso')) exampleParts.push('80kg');
       if (missingFields.includes('reps')) exampleParts.push('10 reps');
-      if (missingFields.includes('sets')) exampleParts.push('3 series');
-      if (missingFields.includes('rir')) exampleParts.push('RIR 2');
+      if (missingFields.includes('series')) exampleParts.push('3 series');
+      if (missingFields.includes('RIR')) exampleParts.push('RIR 2');
+      if (missingFields.includes('duración')) exampleParts.push('60 segundos');
+      if (missingFields.includes('distancia')) exampleParts.push('5 km');
       const exampleText = exampleParts.join(' ');
 
-      return `⚠️ Aún falta: ${missingText}\n\n` +
-             `Ejemplo: "${exampleText}"\n` +
-             `O escribe todos los datos juntos.`;
+      return `${displayText}\n\n⚠️ Falta: ${missingText}\n\nEjemplo: "${exampleText}"\nO escribe todos los datos juntos.`;
     }
 
-    const exerciseType = updatedWorkout.exercise_type || 'strength_weighted';
+    // All data complete - save
     const exerciseName = updatedWorkout.exercise_name || 'Ejercicio';
     const isCustom = updatedWorkout.is_custom ?? false;
 
-    // Guardar directamente sin pedir comentario
+    // Save directly without asking for comment
     await this.saveWorkout(updatedWorkout, null);
     await updateUser(this.user!.phone_number, {
       conversation_state: 'confirm_save',
@@ -816,14 +846,14 @@ Ejemplo: "RIR 2" o "0"`;
     });
 
     const displayText = this.formatWorkoutDisplay(
-      { ...updatedWorkout, exercise_name: updatedWorkout.exercise_name || 'Ejercicio' }, 
-      exerciseType, 
-      exerciseName, 
+      { ...updatedWorkout, exercise_name: exerciseName },
+      exerciseType,
+      exerciseName,
       isCustom
     );
 
     return this.buildConfirmationMessage(
-      { ...updatedWorkout, exercise_name: updatedWorkout.exercise_name || 'Ejercicio' }, 
+      { ...updatedWorkout, exercise_name: exerciseName },
       null
     );
   }
