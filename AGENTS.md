@@ -150,6 +150,8 @@ src/
     data/        # Data access
     services/    # External services (Twilio, etc.)
     supabase/    # Supabase client
+    validation/  # Input validation utilities
+    utils/       # Utility functions (formatting, etc.)
   types/         # TypeScript types
 ```
 
@@ -209,9 +211,9 @@ The `prompts/workout-parser.md` file serves as documentation and a reference for
   - [ ] Implement proper error handling for API failures
   - [ ] Add response validation before returning
   - [ ] Create helper function for prompt formatting
-  - [ ] Add retry logic with exponential backoff
-  - [ ] Implement logging for debugging
-  - [ ] Add timeout handling
+  - [x] Add retry logic with exponential backoff
+  - [x] Implement logging for debugging
+  - [x] Add timeout handling
   - [ ] Create type-safe response parsing
 
 ### 4. Conversation Service Updates
@@ -226,18 +228,18 @@ The `prompts/workout-parser.md` file serves as documentation and a reference for
   - [ ] Add conversation state persistence
 
 ### 5. Validation & Message Formatting
-- [ ] **Create validation module**
-  - [ ] Create `src/lib/validation/exercise-validator.ts`
-  - [ ] Add input sanitization functions
-  - [ ] Implement exercise name normalization
-  - [ ] Create duration/sets/reps validation
-  - [ ] Add custom exercise type mapping
-  - [ ] Implement feedback message generation
-- [ ] **Update message formatting**
-  - [ ] Create `src/lib/utils/message-formatter.ts`
-  - [ ] Add success message templates
-  - [ ] Create error message templates
-  - [ ] Implement confirmation message logic
+- [x] **Create validation module**
+  - [x] Create `src/lib/validation/exercise-validator.ts`
+  - [x] Add input sanitization functions
+  - [x] Implement exercise name normalization
+  - [x] Create duration/sets/reps validation
+  - [x] Add custom exercise type mapping
+  - [x] Implement feedback message generation
+- [x] **Update message formatting**
+  - [x] Create `src/lib/utils/message-formatter.ts`
+  - [x] Add success message templates
+  - [x] Create error message templates
+  - [x] Implement confirmation message logic
   - [ ] Add multi-format response support (text/WhatsApp)
 
 ### Testing & Verification

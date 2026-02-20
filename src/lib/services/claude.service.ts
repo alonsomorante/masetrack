@@ -2,6 +2,50 @@ import Anthropic from '@anthropic-ai/sdk';
 import { ParsedWorkout, ExerciseType } from '@/types';
 import { EXERCISES_DATA, ExerciseDataExtended, detectExerciseTypeFromContext } from '@/lib/data/exercises.catalog';
 
+const DEFAULT_TIMEOUT_MS = 30000;
+const MAX_RETRIES = 3;
+const INITIAL_DELAY_MS = 1000;
+
+interface RetryOptions {
+  maxRetries?: number;
+  initialDelayMs?: number;
+  timeoutMs?: number;
+}
+
+async function callClaudeWithRetry<T>(
+  fn: () => Promise<T>,
+  options: RetryOptions = {}
+): Promise<T> {
+  const maxRetries = options.maxRetries ?? MAX_RETRIES;
+  const initialDelayMs = options.initialDelayMs ?? INITIAL_DELAY_MS;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await Promise.race([
+        fn(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Claude API timeout')), timeoutMs)
+        ),
+      ]);
+      return response;
+    } catch (error) {
+      lastError = error as Error;
+      console.error(`Claude API attempt ${attempt + 1} failed:`, error);
+
+      if (attempt < maxRetries) {
+        const delayMs = initialDelayMs * Math.pow(2, attempt);
+        console.log(`Retrying in ${delayMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 export async function parseWorkoutMessage(message: string): Promise<ParsedWorkout> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -274,12 +318,14 @@ CRITICAL RULES FOR CONVERSATION FLOW:
    - Never show "— reps" or empty values`
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 800,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: message }],
-    });
+    const response = await callClaudeWithRetry(() =>
+      anthropic.messages.create({
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 800,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: message }],
+      })
+    );
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
     console.log('🤖 Claude raw response:', text);
@@ -493,12 +539,14 @@ Return ONLY valid JSON with this structure:
 }`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 600,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: message }],
-    });
+    const response = await callClaudeWithRetry(() =>
+      anthropic.messages.create({
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 600,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: message }],
+      })
+    );
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
     console.log('🤖 Claude follow-up raw response:', text);
@@ -648,12 +696,14 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 300,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: message }],
-    });
+    const response = await callClaudeWithRetry(() =>
+      anthropic.messages.create({
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 300,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: message }],
+      })
+    );
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
     console.log('🤖 Claude intent detection raw response:', text);
