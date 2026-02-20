@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ParsedWorkout, ExerciseType } from '@/types';
-import { getExercisesCatalogText, EXERCISES_DATA, ExerciseDataExtended, detectExerciseTypeFromContext } from '@/lib/data/exercises.catalog';
+import { EXERCISES_DATA, ExerciseDataExtended, detectExerciseTypeFromContext } from '@/lib/data/exercises.catalog';
 
 export async function parseWorkoutMessage(message: string): Promise<ParsedWorkout> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -9,12 +9,10 @@ export async function parseWorkoutMessage(message: string): Promise<ParsedWorkou
   }
 
   const anthropic = new Anthropic({ apiKey });
-  const catalogText = getExercisesCatalogText();
   
   const systemPrompt = `You are a workout tracking assistant. Extract workout data from user messages with extreme precision.
 
-Available exercises with their types:
-${catalogText}
+IMPORTANT: Users can name their exercises however they want. There is NO fixed catalog. Extract the EXACT name the user writes.
 
 EXERCISE TYPE DETECTION - CRITICAL:
 Each exercise has a type that determines what metrics to extract:
@@ -34,30 +32,26 @@ Look for keywords in the message:
 
 EXTRACTION RULES - READ CAREFULLY:
 
-1. EXERCISE NAME EXTRACTION - CRITICAL:
+1. EXERCISE NAME EXTRACTION - CRITICAL - EXTRACT EXACT USER INPUT:
     - Extract the exercise name from the BEGINNING of the message, BEFORE any numbers/weight/reps
-    - Match against the catalog and aliases. Be EXTREMELY FLEXIBLE with:
-      * Typos: "press banca" (missing "de"), "sentadlla" → "sentadilla"
-      * Missing words: "press banca" → "Press de Banca"
-      * Word order: "banca press" → "Press de Banca", "barra curl" → "Curl con Barra"
-      * Extra prepositions/articles: "curl con barra" → "Curl con Barra", "press de pecho" → "Press de Banca"
-      * Abbreviations: "dom" → "Dominadas", "plan" → "Plancha", "curl" → "Curl con Barra"
-    - IGNORE these words when matching: con, de, en, por, para, del, la, el, los, las, un, una
-    - **SEPARATE EXERCISE NAME FROM WEIGHT/NUMBERS** - This is CRITICAL:
-      * "Bench press 80 kilos" → exercise_name: "Press de Banca", weight_kg: 80 (NOT "Bench press 80")
-      * "Press de banca 70 kilos" → exercise_name: "Press de Banca", weight_kg: 70 (NOT "Press de banca 70")
-      * "Press banca 80kg" → exercise_name: "Press de Banca", weight_kg: 80 (NOT "Press banca 80")
-      * "Sentadilla 100kg" → exercise_name: "Sentadilla", weight_kg: 100 (NOT "Sentadilla 100")
-      * "Curl con barra 30kg" → exercise_name: "Curl con Barra", weight_kg: 30 (NOT "Curl con barra 30")
-      * "Curl barra 25kg" → exercise_name: "Curl con Barra", weight_kg: 25 (NOT "Curl barra 25")
-      * "curl de biceps 20kg" → exercise_name: "Curl con Barra", weight_kg: 20 (NOT "curl de biceps 20")
+    - **DO NOT normalize or change the exercise name** - Use EXACTLY what the user wrote
+    - Examples of correct extraction:
+      * "Sentadillas con barra olímpica 95 kilos" → exercise_name: "Sentadillas con barra olímpica"
+      * "Press banca inclinado 80kg" → exercise_name: "Press banca inclinado"
+      * "Pull-down agarre neutral 50kg" → exercise_name: "Pull-down agarre neutral"
+      * "Curl martillo con mancuernas 15kg" → exercise_name: "Curl martillo con mancuernas"
+      * "Sentadilla 100kg" → exercise_name: "Sentadilla"
+      * "Press de banca 70 kilos" → exercise_name: "Press de banca"
     - STOP reading the exercise name when you encounter:
       * Any number (80, 100, etc.)
       * Weight units (kg, kilos, lbs, pounds)
       * Rep indicators (reps, repeticiones)
       * Set indicators (sets, series)
-    - COMMON EXERCISE MAPPINGS - Use these when you see these terms:
-      * "curl", "curl biceps", "curl con barra", "curl barra", "curl de biceps" → "Curl con Barra"
+      * Time indicators (segundos, minutos, horas)
+      * Distance indicators (km, metros, millas)
+    - DO NOT match against any catalog or normalize names
+    - DO NOT change "Sentadillas" to "Sentadilla" - keep it as written
+    - DO NOT add or remove words - use EXACTLY what the user wrote
       * "martillo", "curl martillo", "hammer curl" → "Curl Martillo"
       * "press", "press banca", "pecho", "press de pecho" → "Press de Banca"
       * "dominadas", "pull ups", "chin ups" → "Dominadas"
