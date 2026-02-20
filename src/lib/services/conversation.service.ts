@@ -720,6 +720,7 @@ export class ConversationService {
     const updatedWorkout: ParsedWorkout = {
       ...workout,
       weight_kg: weightValue,
+      exercise_type: 'strength_weighted', // Switch to weighted since user provided weight
     };
 
     const newContext = {
@@ -787,9 +788,28 @@ export class ConversationService {
 
     const parseResult = await parseFollowUpResponse(message, workout);
 
-    // If user said "sin peso", convert to bodyweight and set weight to null
     let updatedWorkout = parseResult.merged;
-    if (convertToBodyweight || isBodyweightExercise) {
+
+    // Check if user provided weight in this response
+    const userProvidedWeight = parseResult.extracted.weight_kg !== null && parseResult.extracted.weight_kg !== undefined;
+    
+    // If user provided weight, switch to weighted type and keep the weight
+    if (userProvidedWeight) {
+      updatedWorkout = {
+        ...updatedWorkout,
+        exercise_type: 'strength_weighted',
+        // weight_kg already set from parseResult.merged
+      };
+    } else if (convertToBodyweight) {
+      // Only convert to bodyweight if user explicitly says "sin peso" AND didn't provide weight
+      updatedWorkout = {
+        ...updatedWorkout,
+        exercise_type: 'strength_bodyweight',
+        weight_kg: null
+      };
+    } else if (isBodyweightExercise) {
+      // If original was bodyweight but user didn't say "sin peso" and didn't provide weight,
+      // keep as bodyweight (no weight_kg)
       updatedWorkout = {
         ...updatedWorkout,
         exercise_type: 'strength_bodyweight',
