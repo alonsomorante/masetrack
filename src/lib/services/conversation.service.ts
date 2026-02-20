@@ -459,59 +459,89 @@ export class ConversationService {
     const exerciseType = parsed.exercise_type || exercise.default_type || 'strength_weighted';
     const exerciseName = exercise.name || parsed.exercise_name;
     
-    // Validate based on exercise type
-    const validation = this.validateExerciseData(parsed, exerciseType);
+    // Check if user provided any weight in their message - if so, force strength_weighted
+    const userProvidedWeight = parsed.weight_kg !== null && parsed.weight_kg !== undefined;
     
-    // If validation fails, ask for ALL missing data at once
-    if (!validation.valid) {
+    // If user provided weight, force strength_weighted type
+    const finalExerciseType = userProvidedWeight ? 'strength_weighted' : exerciseType;
+    
+    // Validate based on exercise type
+    const validation = this.validateExerciseData(parsed, finalExerciseType);
+    
+    // If validation fails OR no weight provided, ask for ALL missing data at once
+    if (!validation.valid || !userProvidedWeight) {
       // Create clean context
       const newContext = {
         pending_workout: {
           ...parsed,
           exercise_name: exerciseName,
-          exercise_type: exerciseType,
+          exercise_type: finalExerciseType,
           is_custom: isCustom,
           custom_exercise_id: isCustom ? exercise.id : null
         },
       };
 
-      // Build the message with ALL missing fields
-      const missingFields = validation.missingFields;
-      const displayText = this.formatWorkoutDisplay(
-        { ...parsed, exercise_name: exerciseName, exercise_type: exerciseType },
-        exerciseType, 
-        exerciseName, 
-        isCustom
-      );
-
-      // Build examples for missing fields
-      const exampleParts: string[] = [];
-      if (missingFields.includes('peso')) exampleParts.push('80kg');
-      if (missingFields.includes('reps')) exampleParts.push('10 reps');
-      if (missingFields.includes('series')) exampleParts.push('3 series');
-      if (missingFields.includes('RIR')) exampleParts.push('RIR 2');
-      if (missingFields.includes('duración')) exampleParts.push('60 segundos');
-      if (missingFields.includes('distancia')) exampleParts.push('5 km');
+      // Determine what's actually missing
+      const missingFields = [...validation.missingFields];
       
-      const exampleText = exampleParts.join(' ');
+      // Always add weight as missing if not provided
+      if (!userProvidedWeight) {
+        if (!missingFields.includes('peso')) {
+          missingFields.push('peso');
+        }
+      }
 
-      // Ask for ALL missing fields at once
-      const missingText = missingFields.join(', ');
-      
-      await updateUser(this.user!.phone_number, {
-        conversation_state: 'waiting_for_reps_and_sets',
-        conversation_context: newContext,
-      });
+      // If no missing fields but no weight, still ask
+      if (missingFields.length === 0 && !userProvidedWeight) {
+        missingFields.push('peso');
+      }
 
-      return `${displayText}\n\n⚠️ Falta: ${missingText}\n\nEjemplo: "${exampleText}"\nO escribe todos los datos juntos.`;
+      // Only proceed if we have weight OR we know it's bodyweight
+      if (userProvidedWeight && missingFields.length === 0 && validation.valid) {
+        // Continue to save - all required data present
+      } else {
+        // Build the message with missing fields
+        const displayText = this.formatWorkoutDisplay(
+          { ...parsed, exercise_name: exerciseName, exercise_type: finalExerciseType },
+          finalExerciseType, 
+          exerciseName, 
+          isCustom
+        );
+
+        // Build examples for missing fields
+        const exampleParts: string[] = [];
+        if (missingFields.includes('peso')) exampleParts.push('80kg');
+        if (missingFields.includes('reps')) exampleParts.push('10 reps');
+        if (missingFields.includes('series')) exampleParts.push('3 series');
+        if (missingFields.includes('RIR')) exampleParts.push('RIR 2');
+        if (missingFields.includes('duración')) exampleParts.push('60 segundos');
+        if (missingFields.includes('distancia')) exampleParts.push('5 km');
+        
+        const exampleText = exampleParts.join(' ');
+
+        // Ask for ALL missing fields at once
+        const missingText = missingFields.join(', ');
+        
+        await updateUser(this.user!.phone_number, {
+          conversation_state: 'waiting_for_reps_and_sets',
+          conversation_context: newContext,
+        });
+
+        // Special message if only weight is missing
+        if (missingFields.length === 1 && missingFields[0] === 'peso') {
+          return `${displayText}\n\n⚠️ Falta: peso (kg)\n\nEjemplo: "80kg"\nO escribe "sin peso" si es con tu peso corporal`;
+        }
+
+        return `${displayText}\n\n⚠️ Falta: ${missingText}\n\nEjemplo: "${exampleText}"\nO escribe todos los datos juntos.`;
+      }
     }
 
-    // Validation passed - save the workout directly
+    // Validation passed and has weight - save the workout
     const newContext = {
       pending_workout: { 
         ...parsed, 
         exercise_name: exerciseName,
-        exercise_type: exerciseType,
+        exercise_type: finalExerciseType,
         is_custom: isCustom,
         custom_exercise_id: isCustom ? exercise.id : null
       },
@@ -519,14 +549,14 @@ export class ConversationService {
 
     // Format display based on type
     const displayText = this.formatWorkoutDisplay(
-      { ...parsed, exercise_name: exerciseName, exercise_type: exerciseType },
-      exerciseType, 
+      { ...parsed, exercise_name: exerciseName, exercise_type: finalExerciseType },
+      finalExerciseType, 
       exerciseName, 
       isCustom
     );
 
     // Ask for RIR only for strength exercises if not provided
-    if (exerciseType.includes('strength') && parsed.rir === null) {
+    if (finalExerciseType.includes('strength') && parsed.rir === null) {
       await updateUser(this.user!.phone_number, {
         conversation_state: 'waiting_for_rir',
         conversation_context: newContext,
