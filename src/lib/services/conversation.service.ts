@@ -546,12 +546,14 @@ export class ConversationService {
       return `${displayText}\n\n¿RIR (0-5) o "no sé"?`;
     }
 
-    // For other types, go directly to comment
+    // Guardar directamente sin pedir comentario
+    const workoutToSave = newContext.pending_workout;
+    await this.saveWorkout(workoutToSave, null);
     await updateUser(this.user!.phone_number, {
-      conversation_state: 'waiting_for_comment',
-      conversation_context: newContext,
+      conversation_state: 'confirm_save',
+      conversation_context: {},
     });
-    return `${displayText}\n\n¿Comentario? Responde 'no' para saltar.`;
+    return this.buildConfirmationMessage(workoutToSave, null);
   }
 
   private validateExerciseData(parsed: ParsedWorkout, exerciseType: string): { valid: boolean; message: string; missingFields: string[] } {
@@ -805,14 +807,25 @@ Ejemplo: "RIR 2" o "0"`;
     const exerciseType = updatedWorkout.exercise_type || 'strength_weighted';
     const exerciseName = updatedWorkout.exercise_name || 'Ejercicio';
     const isCustom = updatedWorkout.is_custom ?? false;
-    const displayText = this.formatWorkoutDisplay(updatedWorkout, exerciseType, exerciseName, isCustom);
 
+    // Guardar directamente sin pedir comentario
+    await this.saveWorkout(updatedWorkout, null);
     await updateUser(this.user!.phone_number, {
-      conversation_state: 'waiting_for_comment',
-      conversation_context: newContext,
+      conversation_state: 'confirm_save',
+      conversation_context: {},
     });
 
-    return `${displayText}\n\n¿Comentario? Responde 'no' para saltar.`;
+    const displayText = this.formatWorkoutDisplay(
+      { ...updatedWorkout, exercise_name: updatedWorkout.exercise_name || 'Ejercicio' }, 
+      exerciseType, 
+      exerciseName, 
+      isCustom
+    );
+
+    return this.buildConfirmationMessage(
+      { ...updatedWorkout, exercise_name: updatedWorkout.exercise_name || 'Ejercicio' }, 
+      null
+    );
   }
 
   private async handleWaitingForRir(message: string, context: Record<string, any>): Promise<string> {
@@ -932,7 +945,6 @@ Ejemplos:
 
     for (const editPattern of editPatterns) {
       if (editPattern.pattern.test(msgLower)) {
-        // Guardar estado anterior para poder volver
         const newContext = {
           ...context,
           previous_state: 'waiting_for_comment',
@@ -963,7 +975,8 @@ Ejemplos:
       }
     }
 
-    const notes = /^no$/i.test(message) ? null : message;
+    // Guardar directamente sin pedir comentario
+    const notes = null;
 
     try {
       // Validar datos antes de guardar
