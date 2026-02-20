@@ -2,12 +2,16 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowRight, Loader2, CheckCircle, Lock, Shield } from 'lucide-react'
+import { ArrowRight, Loader2, CheckCircle, Lock, Shield, RefreshCw } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 
 function VerifyForm() {
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [resendTimer, setResendTimer] = useState(60)
+  const [canResend, setCanResend] = useState(false)
+  const [resendMessage, setResendMessage] = useState('')
   const [error, setError] = useState('')
   const [verified, setVerified] = useState(false)
   const router = useRouter()
@@ -15,11 +19,52 @@ function VerifyForm() {
   const phone = searchParams.get('phone') || ''
   const isRegister = searchParams.get('register') === 'true'
 
+  // Timer para reenvío
+  useEffect(() => {
+    if (resendTimer > 0) {
+      const timer = setTimeout(() => {
+        setResendTimer(resendTimer - 1)
+      }, 1000)
+      return () => clearTimeout(timer)
+    } else {
+      setCanResend(true)
+    }
+  }, [resendTimer])
+
   useEffect(() => {
     if (!phone) {
       router.push('/login')
     }
   }, [phone, router])
+
+  const handleResend = async () => {
+    if (!canResend || resending) return
+    
+    setResending(true)
+    setResendMessage('')
+    
+    try {
+      const response = await fetch('/api/auth/send-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setResendMessage('✅ Código reenviado')
+        setResendTimer(60)
+        setCanResend(false)
+      } else {
+        setResendMessage(data.error || 'Error al reenviar')
+      }
+    } catch (err) {
+      setResendMessage('Error de conexión')
+    } finally {
+      setResending(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -183,10 +228,36 @@ function VerifyForm() {
             </button>
           </form>
 
-          <div className="mt-6 pt-4 border-t border-[var(--border-color)]">
+          <div className="mt-6 pt-4 border-t border-[var(--border-color)] flex flex-col gap-3">
+            {resendMessage && (
+              <p className={`font-mono text-xs text-center ${resendMessage.includes('✅') ? 'text-[var(--success)]' : 'text-[var(--error)]'}`}>
+                {resendMessage}
+              </p>
+            )}
+            
+            {canResend ? (
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resending}
+                className="flex items-center justify-center gap-2 font-mono text-xs text-[var(--accent)] hover:text-[var(--accent-light)] transition-colors disabled:opacity-50"
+              >
+                {resending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4" />
+                )}
+                <span>Reenviar código SMS</span>
+              </button>
+            ) : (
+              <p className="font-mono text-xs text-center text-[var(--text-muted)]">
+                ¿No recibiste el código? Espera {resendTimer}s para reenviar
+              </p>
+            )}
+            
             <button
               onClick={() => router.push(isRegister ? '/' : '/login')}
-              className="font-mono text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors uppercase"
+              className="font-mono text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors uppercase text-center"
             >
               ← VOLVER
             </button>

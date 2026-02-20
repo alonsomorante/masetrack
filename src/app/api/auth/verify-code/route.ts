@@ -17,15 +17,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    console.log(`🔐 Verificando código para ${phone}, código recibido: ${code}`)
+
     // Verificar código
     const isValid = await verifyCode(phone, code)
     
     if (!isValid) {
+      console.log(`❌ Código inválido para ${phone}`)
       return NextResponse.json(
         { error: 'Código incorrecto o expirado' },
         { status: 401 }
       )
     }
+
+    console.log(`✅ Código válido para ${phone}`)
 
     // Obtener usuario
     const user = await getUserByPhone(phone)
