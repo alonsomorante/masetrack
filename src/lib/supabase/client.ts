@@ -285,3 +285,20 @@ export async function updateCustomExerciseImage(exerciseId: number, imageUrl: st
     throw error;
   }
 }
+
+export async function getUserCustomExercises(phoneNumber: string): Promise<{ id: number; name: string; muscle_group: string }[]> {
+  const supabase = getSupabaseClient();
+  
+  const { data, error } = await supabase
+    .from('custom_exercises')
+    .select('id, name, muscle_group')
+    .eq('user_phone', phoneNumber)
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching user custom exercises:', error);
+    return [];
+  }
+
+  return data || [];
+}

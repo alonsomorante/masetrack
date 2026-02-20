@@ -7,6 +7,7 @@ import {
   createWorkoutEntry,
   createCustomExercise,
   getCustomExerciseByName,
+  getUserCustomExercises,
 } from '@/lib/supabase/client';
 import { parseWorkoutMessage, parseFollowUpResponse, detectUserIntent } from '@/lib/services/claude.service';
 import { findExerciseByName, getExercisesListText, EXERCISES_DATA, getExercisesByMuscleGroup, ExerciseDataExtended } from '@/lib/data/exercises.catalog';
@@ -125,30 +126,35 @@ export class ConversationService {
     const userName = this.user?.name ? ` ${this.user.name}` : '';
     
     let message = isNewUser 
-      ? `¡Hola${userName}! 👋 Soy tu asistente de entrenamiento.`
+      ? `¡Bienvenido a Masetrack${userName}! 👋\n\nTu sistema de entrenamiento, a tu manera.`
       : `¡Hola de nuevo${userName}! 👋`;
     
-    message += '\n\n📋 *COMANDOS DISPONIBLES:*\n';
-    message += '• "ejercicios" - Ver lista de ejercicios\n';
-    message += '• "web" - Obtener link del dashboard\n';
-    message += '• "cancelar" - Cancelar registro actual\n';
-    message += '• Describe tu entrenamiento directamente\n';
-    message += '\n💪 *CÓMO REGISTRAR:*\n';
-    message += '\n*Ejercicios de Fuerza:*\n';
-    message += '"Ejercicio + Peso + Reps + Series + RIR"\n';
-    message += '• "Press de banca 80kg 10 reps 3 series RIR 1"\n';
-    message += '• "Dominadas 10 reps 3 series al fallo"\n';
-    message += '💡 *RIR = Repeticiones en Reserva (0-5)\n';
-    message += '   0 = al fallo, 1 = una más, etc.\n';
-    message += '\n*Ejercicios Isométricos:*\n';
-    message += '"Ejercicio + Tiempo"\n';
+    message += '\n\n📝 *CÓMO REGISTRAR:*\n';
+    message += '\n*Fuerza:*\n';
+    message += '"Nombre + Peso + Reps + Series + RIR"\n';
+    message += '• "Press banca 80kg 10 reps 3 series RIR 2"\n';
+    message += '• "Sentadilla barra 100kg 8 reps 4 series"\n';
+    message += '• "Curl biceps 20kg 12 reps 3 series RIR 1"\n';
+    message += '\n*RIR (Repeticiones en Reserva):*\n';
+    message += '• 0 = Al fallo\n';
+    message += '• 1 = Una rep más\n';
+    message += '• 2-5 = Esa cantidad más\n';
+    message += '\n*Por tiempo:*\n';
+    message += '"Nombre + Tiempo"\n';
     message += '• "Plancha 60 segundos"\n';
-    message += '• "Plancha 2 minutos"\n';
+    message += '• "Abdominales 2 minutos"\n';
     message += '\n*Cardio:*\n';
-    message += '"Ejercicio + Tiempo/Distancia"\n';
+    message += '"Nombre + Tiempo/Distancia"\n';
     message += '• "Caminadora 30 minutos"\n';
     message += '• "Correr 5 kilómetros"\n';
-    message += '\n✨ Si no reconozco un ejercicio, te ayudaré a crearlo.';
+    message += '\n💡 *SIN LÍMITES:*\n';
+    message += '• Nombra tus ejercicios como prefieras\n';
+    message += '• "Pull-down agarre neutral", "Press banca inclinado", etc.\n';
+    message += '• Todo se guarda automáticamente\n';
+    message += '\n📋 *COMANDOS:*\n';
+    message += '• "ejercicios" - Ver tus ejercicios guardados\n';
+    message += '• "web" - Link del dashboard\n';
+    message += '• "cancelar" - Cancelar registro actual';
     
     return message;
   }
@@ -167,26 +173,43 @@ export class ConversationService {
            `Inicia sesión con tu número de teléfono.`;
   }
 
-  // Mensaje de lista de ejercicios
-  private getExercisesMessage(): string {
-    const grouped = getExercisesByMuscleGroup();
-    let message = '📋 *EJERCICIOS DISPONIBLES*\n\n';
+  // Mensaje de lista de ejercicios personalizados del usuario
+  private async getExercisesMessage(): Promise<string> {
+    const userExercises = await getUserCustomExercises(this.user!.phone_number);
+    
+    let message = '📋 *TUS EJERCICIOS GUARDADOS*\n\n';
+    
+    if (!userExercises || userExercises.length === 0) {
+      message += 'No tienes ejercicios guardados aún.\n\n';
+      message += '💡 *Cómo funciona:*\n';
+      message += '• Escribe el nombre de tu ejercicio + datos\n';
+      message += '• Ej: "Press banca 80kg 10 reps 3 series"\n';
+      message += '• Se guardará automáticamente\n';
+      message += '\n💡 Nombra tus ejercicios como prefieras:\n';
+      message += '• "Press banca inclinado"\n';
+      message += '• "Pull-down agarre neutral"\n';
+      message += '• "Sentadilla profundidad"\n';
+      return message;
+    }
+    
+    // Agrupar por grupo muscular
+    const grouped = userExercises.reduce((acc, ex) => {
+      const group = ex.muscle_group || 'otros';
+      if (!acc[group]) acc[group] = [];
+      acc[group].push(ex.name);
+      return acc;
+    }, {} as Record<string, string[]>);
     
     Object.entries(grouped).forEach(([group, exercises]) => {
       message += `*${group.toUpperCase()}:*\n`;
-      exercises.forEach(ex => {
-        const icon = this.getExerciseTypeIcon(ex.exercise_type);
-        message += `  ${icon} ${ex.name}\n`;
+      exercises.forEach(name => {
+        message += `  • ${name}\n`;
       });
       message += '\n';
     });
     
-    message += '📖 *Leyenda:*\n';
-    message += '🏋️ Fuerza con peso\n';
-    message += '💪 Peso corporal\n';
-    message += '⏱️ Por tiempo (isométrico/cardio)\n';
-    message += '🏃 Cardio por distancia\n\n';
-    message += '💡 Escribe el nombre del ejercicio seguido de los detalles.';
+    message += '💡 Para registrar usa el nombre exacto seguido de los datos.\n';
+    message += 'Ej: "Press banca 80kg 10 reps 3 series"';
     
     return message;
   }
@@ -266,7 +289,7 @@ export class ConversationService {
         }
         
         if (userIntent.intent === 'exercises_list' || this.isCommand(message, this.COMMANDS.EXERCISES)) {
-          return this.getExercisesMessage();
+          return await this.getExercisesMessage();
         }
         
         if (userIntent.intent === 'web_dashboard' || this.isCommand(message, this.COMMANDS.WEB)) {
@@ -337,41 +360,39 @@ export class ConversationService {
     const parsed = await parseWorkoutMessage(message);
 
     if (!parsed.exercise_name) {
-      return `🤔 No reconocí "${message}" como un ejercicio.\n\n` +
-             `💡 *Opciones:*\n` +
-             `• Escribe "ejercicios" para ver la lista disponible\n` +
-             `• Intenta con un formato como: "Press de banca 80kg 10 reps 3 series"\n` +
-             `• Si es un ejercicio nuevo, te ayudaré a registrarlo`;
+      return `🤔 No entendí "${message}".\n\n` +
+             `💡 *Formato:*\n` +
+             `"Nombre del ejercicio + datos"\n` +
+             `Ej: "Press banca 80kg 10 reps 3 series RIR 2"\n` +
+             `Ej: "Sentadilla 100kg 8 reps 4 series"\n\n` +
+             `💡 Nombra tus ejercicios como prefieras, sin límites.`;
     }
 
-    // Buscar en ejercicios oficiales
-    const officialExercise = findExerciseByName(parsed.exercise_name);
-    if (officialExercise) {
-      // Verificar si el tipo es ambiguo
-      if (parsed.is_ambiguous && officialExercise.allowed_types.length > 1) {
-        return this.askForExerciseType(officialExercise, parsed, context);
-      }
-      return this.processExerciseByType(parsed, officialExercise, context);
-    }
-
-    // Buscar en ejercicios personalizados
+    // Buscar solo en ejercicios personalizados del usuario (no en catálogo)
     const customExercise = await getCustomExerciseByName(this.user!.phone_number, parsed.exercise_name);
+
     if (customExercise) {
+      // El ejercicio ya existe para este usuario
       return this.processExerciseByType(parsed, customExercise as any, context, true);
     }
 
-    // Crear ejercicio personalizado
-    const newContext = {
-      ...context,
-      pending_custom_exercise: { name: parsed.exercise_name, parsed },
-    };
-    await updateUser(this.user!.phone_number, {
-      conversation_state: 'creating_custom_exercise_name',
-      conversation_context: newContext,
+    // El ejercicio NO existe - crear automáticamente como personalizado sin preguntar
+    console.log(`🆕 Creando ejercicio automáticamente: ${parsed.exercise_name}`);
+
+    // Crear ejercicio personalizado automáticamente
+    const newExercise = await createCustomExercise({
+      user_phone: this.user!.phone_number,
+      name: parsed.exercise_name,
+      muscle_group: 'otros', // Por defecto, usuario puede editar después
     });
-    return `🤔 No encontré "${parsed.exercise_name}" en el catálogo.\n\n` +
-           `¿Quieres crearlo como ejercicio personalizado?\n` +
-           `Responde *"sí"* para continuar o *"no"* para cancelar.`;
+
+    if (!newExercise) {
+      return `❌ Error al crear el ejercicio "${parsed.exercise_name}".\n\n` +
+             `Intenta de nuevo o usa otro nombre.`;
+    }
+
+    // Procesar el ejercicio recién creado
+    return this.processExerciseByType(parsed, newExercise, context, true);
   }
 
   private async askForExerciseType(exercise: ExerciseDataExtended, parsed: ParsedWorkout, context: Record<string, any>): Promise<string> {
